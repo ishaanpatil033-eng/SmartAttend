@@ -1,0 +1,11 @@
+{
+  "name": "smartattend",
+  "private": true,
+  "version": "1.0.0",
+  "description": "SmartAttend: Students Attendance Management System",
+  "scripts": {
+    "dev": "npm run dev --prefix frontend",
+    "build": "npm run build --prefix frontend",
+    "frontend:install": "npm install --prefix frontend"
+  }
+}
