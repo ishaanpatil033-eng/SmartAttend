@@ -1,18 +1,14 @@
-﻿# ===================================================================
+# ===================================================================
 # SmartAttend Frontend — Netlify Configuration (Frontend Directory)
 # ===================================================================
 
 [build]
-  # Publish directory containing the compiled Vite output
   publish = "dist"
-
-  # Production build command
   command = "npm run build"
 
 [build.environment]
   NODE_VERSION = "20"
 
-# Single-Page Application (SPA) redirect rule for React Router
 [[redirects]]
   from = "/*"
   to = "/index.html"
