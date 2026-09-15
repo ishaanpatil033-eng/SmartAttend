@@ -13,7 +13,17 @@ import java.util.Optional;
 @Repository
 public interface AttendanceRepository extends JpaRepository<Attendance, Long> {
     List<Attendance> findByCourse(Course course);
+    List<Attendance> findByCourseOrderByAttendanceDateDescAttendanceTimeDesc(Course course);
     List<Attendance> findByStudent(Student student);
+    List<Attendance> findByStudentOrderByAttendanceDateDescAttendanceTimeDesc(Student student);
     List<Attendance> findByCourseAndAttendanceDate(Course course, LocalDate attendanceDate);
     Optional<Attendance> findByStudentAndCourseAndAttendanceDate(Student student, Course course, LocalDate attendanceDate);
+    Optional<Attendance> findByStudentAndSessionCode(Student student, String sessionCode);
+    boolean existsByStudentAndSessionCode(Student student, String sessionCode);
+    long countBySessionCode(String sessionCode);
+    List<Attendance> findBySessionCode(String sessionCode);
+
+    @org.springframework.data.jpa.repository.Query("SELECT COUNT(a) > 0 FROM Attendance a WHERE a.student = :student AND a.sessionCode IN :sessionCodes")
+    boolean existsByStudentAndSessionCodeIn(@org.springframework.data.repository.query.Param("student") Student student,
+                                            @org.springframework.data.repository.query.Param("sessionCodes") java.util.Collection<String> sessionCodes);
 }

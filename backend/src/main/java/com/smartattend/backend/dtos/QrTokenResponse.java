@@ -6,6 +6,7 @@ public class QrTokenResponse {
 
     private String token;
     private String courseId;
+    private String sessionCode;
     private int expiresInSeconds;
     private Instant expiresAt;
 
@@ -13,8 +14,13 @@ public class QrTokenResponse {
     }
 
     public QrTokenResponse(String token, String courseId, int expiresInSeconds, Instant expiresAt) {
+        this(token, courseId, courseId, expiresInSeconds, expiresAt);
+    }
+
+    public QrTokenResponse(String token, String courseId, String sessionCode, int expiresInSeconds, Instant expiresAt) {
         this.token = token;
         this.courseId = courseId;
+        this.sessionCode = sessionCode;
         this.expiresInSeconds = expiresInSeconds;
         this.expiresAt = expiresAt;
     }
@@ -33,6 +39,14 @@ public class QrTokenResponse {
 
     public void setCourseId(String courseId) {
         this.courseId = courseId;
+    }
+
+    public String getSessionCode() {
+        return sessionCode;
+    }
+
+    public void setSessionCode(String sessionCode) {
+        this.sessionCode = sessionCode;
     }
 
     public int getExpiresInSeconds() {

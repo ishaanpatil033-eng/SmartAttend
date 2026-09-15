@@ -8,11 +8,18 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.LocalDate;
 import java.time.LocalTime;
+import java.time.temporal.ChronoUnit;
 
 @Entity
-@Table(name = "attendance")
+@Table(
+    name = "attendance",
+    uniqueConstraints = {
+        @UniqueConstraint(name = "uk_student_session", columnNames = {"student_id", "session_code"})
+    }
+)
 public class Attendance {
 
     @Id
@@ -26,6 +33,9 @@ public class Attendance {
     @ManyToOne(optional = false)
     @JoinColumn(name = "course_id", nullable = false)
     private Course course; // class/course
+
+    @Column(name = "session_code", length = 100)
+    private String sessionCode;
 
     @Column(name = "attendance_date", nullable = false)
     private LocalDate attendanceDate;
@@ -43,10 +53,15 @@ public class Attendance {
     }
 
     public Attendance(Student student, Course course, LocalDate attendanceDate, LocalTime attendanceTime, String attendanceStatus) {
+        this(student, course, null, attendanceDate, attendanceTime, attendanceStatus);
+    }
+
+    public Attendance(Student student, Course course, String sessionCode, LocalDate attendanceDate, LocalTime attendanceTime, String attendanceStatus) {
         this.student = student;
         this.course = course;
+        this.sessionCode = sessionCode;
         this.attendanceDate = attendanceDate;
-        this.attendanceTime = attendanceTime;
+        this.attendanceTime = attendanceTime != null ? attendanceTime.truncatedTo(ChronoUnit.SECONDS) : LocalTime.now().truncatedTo(ChronoUnit.SECONDS);
         this.attendanceStatus = attendanceStatus;
         this.moodleSynced = false;
     }
@@ -75,6 +90,14 @@ public class Attendance {
         this.course = course;
     }
 
+    public String getSessionCode() {
+        return sessionCode;
+    }
+
+    public void setSessionCode(String sessionCode) {
+        this.sessionCode = sessionCode;
+    }
+
     public LocalDate getAttendanceDate() {
         return attendanceDate;
     }
@@ -88,7 +111,7 @@ public class Attendance {
     }
 
     public void setAttendanceTime(LocalTime attendanceTime) {
-        this.attendanceTime = attendanceTime;
+        this.attendanceTime = attendanceTime != null ? attendanceTime.truncatedTo(ChronoUnit.SECONDS) : null;
     }
 
     public String getAttendanceStatus() {

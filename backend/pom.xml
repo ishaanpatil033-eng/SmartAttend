@@ -73,6 +73,13 @@
             <scope>test</scope>
         </dependency>
 
+        <!-- Apache POI for authentic .xlsx Defaulter List generation -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.3.0</version>
+        </dependency>
+
         <!-- Testing -->
         <dependency>
             <groupId>org.springframework.boot</groupId>

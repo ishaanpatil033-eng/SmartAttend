@@ -14,7 +14,8 @@ import java.time.Instant;
     name = "attendance_qr_tokens",
     indexes = {
         @Index(name = "idx_qr_token", columnList = "token"),
-        @Index(name = "idx_qr_course_id", columnList = "course_id")
+        @Index(name = "idx_qr_course_id", columnList = "course_id"),
+        @Index(name = "idx_qr_session_code", columnList = "session_code")
     }
 )
 public class AttendanceQrToken {
@@ -29,6 +30,18 @@ public class AttendanceQrToken {
     @Column(name = "course_id", nullable = false, length = 50)
     private String courseId;
 
+    @Column(name = "session_code", length = 100)
+    private String sessionCode;
+
+    @Column(name = "consumed", nullable = false)
+    private boolean consumed = false;
+
+    @Column(name = "consumed_at")
+    private Instant consumedAt;
+
+    @Column(name = "consumed_by_student_id", length = 50)
+    private String consumedByStudentId;
+
     @Column(name = "created_at", nullable = false)
     private Instant createdAt;
 
@@ -41,8 +54,19 @@ public class AttendanceQrToken {
     public AttendanceQrToken(String token, String courseId, Instant createdAt, Instant expiresAt) {
         this.token = token;
         this.courseId = courseId;
+        this.sessionCode = courseId;
         this.createdAt = createdAt;
         this.expiresAt = expiresAt;
+        this.consumed = false;
+    }
+
+    public AttendanceQrToken(String token, String courseId, String sessionCode, Instant createdAt, Instant expiresAt) {
+        this.token = token;
+        this.courseId = courseId;
+        this.sessionCode = sessionCode;
+        this.createdAt = createdAt;
+        this.expiresAt = expiresAt;
+        this.consumed = false;
     }
 
     public Long getId() {
@@ -67,6 +91,38 @@ public class AttendanceQrToken {
 
     public void setCourseId(String courseId) {
         this.courseId = courseId;
+    }
+
+    public String getSessionCode() {
+        return sessionCode;
+    }
+
+    public void setSessionCode(String sessionCode) {
+        this.sessionCode = sessionCode;
+    }
+
+    public boolean isConsumed() {
+        return consumed;
+    }
+
+    public void setConsumed(boolean consumed) {
+        this.consumed = consumed;
+    }
+
+    public Instant getConsumedAt() {
+        return consumedAt;
+    }
+
+    public void setConsumedAt(Instant consumedAt) {
+        this.consumedAt = consumedAt;
+    }
+
+    public String getConsumedByStudentId() {
+        return consumedByStudentId;
+    }
+
+    public void setConsumedByStudentId(String consumedByStudentId) {
+        this.consumedByStudentId = consumedByStudentId;
     }
 
     public Instant getCreatedAt() {
