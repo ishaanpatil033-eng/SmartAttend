@@ -89,7 +89,7 @@ const StudentCourseManagement = () => {
     try {
       setLoading(true);
       await createStudent({
-        studentId: newStudentId.trim(),
+        studentId: newStudentId.trim().toUpperCase(),
         studentName: newStudentName.trim(),
         email: newStudentEmail.trim()
       });
@@ -120,7 +120,7 @@ const StudentCourseManagement = () => {
     try {
       setLoading(true);
       await createCourse({
-        courseId: newCourseId.trim(),
+        courseId: newCourseId.trim().toUpperCase(),
         courseName: newCourseName.trim()
       });
       setSuccessMsg(`Course '${newCourseName}' added successfully.`);
