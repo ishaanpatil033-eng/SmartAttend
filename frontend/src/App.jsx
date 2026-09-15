@@ -15,8 +15,8 @@ import { getMe, logout } from './services/api.js';
 import './styles.css';
 
 const App = () => {
-  // viewMode: 'login' (default authentication screen) | 'workspace' (role dashboards) | 'landing'
-  const [viewMode, setViewMode] = useState('login');
+  // viewMode: 'landing' (public homepage) | 'login' (authentication screen) | 'workspace' (role dashboards)
+  const [viewMode, setViewMode] = useState('landing');
   const [currentUser, setCurrentUser] = useState(null); // Authenticated Spring Security user
   const [selectedRole, setSelectedRole] = useState(null); // 'student' | 'teacher' | 'admin' | 'hod'
   const [activeTab, setActiveTab] = useState('student-dashboard');
@@ -53,10 +53,10 @@ const App = () => {
           setActiveSubTab('overview');
           setViewMode('workspace');
         } else {
-          setViewMode('login');
+          setViewMode('landing');
         }
       } catch (err) {
-        setViewMode('login');
+        setViewMode('landing');
       }
     };
     restoreSession();
@@ -105,7 +105,7 @@ const App = () => {
     if (currentUser) {
       setViewMode('workspace');
     } else {
-      setViewMode('login');
+      setViewMode('landing');
     }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -143,7 +143,7 @@ const App = () => {
     } finally {
       setCurrentUser(null);
       setSelectedRole(null);
-      setViewMode('login');
+      setViewMode('landing');
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
   };
