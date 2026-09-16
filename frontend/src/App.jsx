@@ -21,7 +21,6 @@ const App = () => {
   const [selectedRole, setSelectedRole] = useState(null); // 'student' | 'teacher' | 'admin' | 'hod'
   const [activeTab, setActiveTab] = useState('student-dashboard');
   const [activeSubTab, setActiveSubTab] = useState('overview');
-  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
   const [activeStudentId, setActiveStudentId] = useState('');
   const [activeCourseId, setActiveCourseId] = useState('');
   const [activeSessionCode, setActiveSessionCode] = useState('');
@@ -115,7 +114,6 @@ const App = () => {
     if (subTabKey) {
       setActiveSubTab(subTabKey);
     }
-    setIsMobileSidebarOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -130,7 +128,6 @@ const App = () => {
     const targetTab = roleTabMap[cleanRole] || 'student-dashboard';
     setActiveTab(targetTab);
     setActiveSubTab('overview');
-    setIsMobileSidebarOpen(false);
     setViewMode('workspace');
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -194,7 +191,6 @@ const App = () => {
         onLogout={handleLogout}
         currentRole={selectedRole}
         currentUser={currentUser}
-        onToggleMobileNav={() => setIsMobileSidebarOpen(prev => !prev)}
       />
 
       <HorizontalNavbar
@@ -202,8 +198,6 @@ const App = () => {
         activeTab={activeTab}
         activeSubTab={activeSubTab}
         onNavigate={handleNavigate}
-        isMobileOpen={isMobileSidebarOpen}
-        onCloseMobile={() => setIsMobileSidebarOpen(false)}
       />
 
       <div className="workspace-shell horizontal-workspace">
