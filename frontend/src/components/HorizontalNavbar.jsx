@@ -4,7 +4,9 @@ const HorizontalNavbar = ({
   role,
   activeTab,
   activeSubTab,
-  onNavigate
+  onNavigate,
+  isMobileOpen,
+  onCloseMobile
 }) => {
   const userRole = (role || '').toLowerCase();
   const [openDropdownId, setOpenDropdownId] = useState(null);

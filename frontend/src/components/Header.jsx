@@ -5,11 +5,14 @@ const Header = ({
   onSwitchRole,
   onLogout,
   currentRole,
-  currentUser
+  currentUser,
+  onToggleMobileSidebar,
+  onToggleMobileNav
 }) => {
   const [isChangePasswordOpen, setIsChangePasswordOpen] = useState(false);
 
   const userRoleStr = ((currentUser && currentUser.role) || currentRole || '').toUpperCase();
+  const toggleMobileNav = onToggleMobileNav || onToggleMobileSidebar;
 
   const getRoleDisplayName = (r) => {
     const raw = (r || '').toLowerCase();
@@ -23,6 +26,22 @@ const Header = ({
   return (
     <header className="topbar header-compact">
       <div className="header-brand-group">
+        {/* Mobile/Tablet Horizontal Navbar Toggle */}
+        {currentUser && toggleMobileNav && (
+          <button
+            type="button"
+            className="mobile-sidebar-toggle-btn topbar-sidebar-toggle"
+            onClick={toggleMobileNav}
+            aria-label="Toggle navigation menu"
+            title="Toggle Navigation Menu"
+          >
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="3" y1="12" x2="21" y2="12"></line>
+              <line x1="3" y1="6" x2="21" y2="6"></line>
+              <line x1="3" y1="18" x2="21" y2="18"></line>
+            </svg>
+          </button>
+        )}
 
         <div className="brand-identity-group" style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <span className="brand-mark">SA</span>
