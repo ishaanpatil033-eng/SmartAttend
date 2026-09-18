@@ -1,10 +1,35 @@
+# Dependencies
 node_modules/
+**/node_modules/
+
+# Build & Test outputs
+dist/
+**/dist/
+target/
+**/target/
+coverage/
+*.log
+npm-debug.log*
+
+# Environment & Local secrets
 .env
 .env.*
 !.env.example
-dist/
-coverage/
-target/
-*.log
-npm-debug.log*
+application-local.properties
+**/application-local.properties
+*-local.properties
+*.local.properties
+local.properties
+
+# IDE & Editor files
+.vscode/
+**/.vscode/
+.idea/
+**/.idea/
+*.iml
+.jdk/
+**/.jdk/
+
+# OS-specific temporary files
 .DS_Store
+Thumbs.db

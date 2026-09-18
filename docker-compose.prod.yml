@@ -1,0 +1,86 @@
+# ===================================================================
+# SmartAttend — Production Docker Compose Orchestration
+# Services: MySQL 8.0 Database, Spring Boot 3 Backend, Nginx / React Frontend
+# ===================================================================
+
+services:
+  database:
+    image: mysql:8.0
+    restart: unless-stopped
+    container_name: smartattend-db
+    environment:
+      MYSQL_DATABASE: ${DB_NAME:-smartattend}
+      MYSQL_USER: ${DB_USER:-smartattend_app}
+      MYSQL_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be provided in the environment or .env file and cannot be empty}
+      MYSQL_ROOT_PASSWORD: ${DB_ROOT_PASSWORD:?DB_ROOT_PASSWORD must be provided in the environment or .env file and cannot be empty}
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./database/01-init-schema.sql:/docker-entrypoint-initdb.d/01-init-schema.sql:ro
+    networks:
+      - internal_net
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$$MYSQL_ROOT_PASSWORD"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    container_name: smartattend-backend
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:mysql://database:3306/${DB_NAME:-smartattend}?createDatabaseIfNotExist=false&useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=UTC
+      SPRING_DATASOURCE_USERNAME: ${DB_USER:-smartattend_app}
+      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be provided in the environment or .env file and cannot be empty}
+      FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost}
+      MOODLE_BASE_URL: ${MOODLE_BASE_URL:-http://host.docker.internal/moodle}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      COOKIE_SAME_SITE: ${COOKIE_SAME_SITE:-Lax}
+    secrets:
+      - moodle_token
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - uploads_data:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:8080/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 25s
+    depends_on:
+      database:
+        condition: service_healthy
+    networks:
+      - internal_net
+      - proxy_net
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    container_name: smartattend-frontend
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - proxy_net
+
+secrets:
+  moodle_token:
+    environment: MOODLE_TOKEN
+
+volumes:
+  db_data:
+  uploads_data:
+
+networks:
+  internal_net:
+    internal: true
+  proxy_net:
