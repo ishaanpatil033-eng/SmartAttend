@@ -1,7 +1,20 @@
 import axios from 'axios';
 
+const getApiBaseUrl = () => {
+  // In development, target the local backend unless configured otherwise
+  if (import.meta.env.DEV) {
+    return import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080/api';
+  }
+  // In deployed production, use same-origin '/api' to route through the Netlify reverse proxy,
+  // making authentication cookies first-party in all browsers.
+  if (import.meta.env.VITE_API_BASE_URL && import.meta.env.VITE_API_BASE_URL !== 'https://smartattend-backend-64np.onrender.com/api') {
+    return import.meta.env.VITE_API_BASE_URL;
+  }
+  return '/api';
+};
+
 const api = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:8080/api' : '/api'),
+  baseURL: getApiBaseUrl(),
   withCredentials: true, // Crucial for Spring Security HTTP session cookies (JSESSIONID)
   headers: {
     'Content-Type': 'application/json'

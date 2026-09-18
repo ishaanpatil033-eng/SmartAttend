@@ -64,7 +64,10 @@ const LandingPage = ({ onGetStarted, onLogin }) => {
             <button
               type="button"
               className="landing-nav-link"
-              onClick={() => scrollToSection('access-portals')}
+              onClick={() => {
+                setMobileMenuOpen(false);
+                handleLoginClick();
+              }}
             >
               Sign In
             </button>

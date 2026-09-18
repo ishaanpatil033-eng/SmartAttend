@@ -53,10 +53,10 @@ const App = () => {
           setActiveSubTab('overview');
           setViewMode('workspace');
         } else {
-          setViewMode('landing');
+          setViewMode(prev => (prev === 'login' ? 'login' : 'landing'));
         }
       } catch (err) {
-        setViewMode('landing');
+        setViewMode(prev => (prev === 'login' ? 'login' : 'landing'));
       }
     };
     restoreSession();
