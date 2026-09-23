@@ -6066,6 +6066,7 @@ body {
 .scanner-view {
   width: 100%;
   max-width: 100%;
+  min-height: 280px;
 }
 
 .scanner-active {
@@ -6985,11 +6986,22 @@ body {
 }
 
 /* Camera Scanner Video Containment */
+#qr-camera-viewport {
+  width: 100%;
+  min-height: 280px;
+}
+
 #qr-camera-viewport video {
-  max-width: 100% !important;
-  height: auto !important;
+  width: 100% !important;
+  height: 100% !important;
+  min-height: 280px;
   border-radius: var(--radius-sm);
   object-fit: cover;
+  display: block !important;
+}
+
+#qr-camera-viewport canvas {
+  max-width: 100%;
 }
 
 /* 2. TABLET RESPONSIVE RULES (max-width: 1024px) */

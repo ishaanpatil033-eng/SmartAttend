@@ -130,6 +130,10 @@ const StudentQrScanner = ({
       }
       html5QrCodeRef.current = null;
     }
+    const viewportEl = document.getElementById(scannerContainerId);
+    if (viewportEl) {
+      viewportEl.style.display = '';
+    }
     setIsScanning(false);
   }, []);
 
@@ -248,6 +252,15 @@ const StudentQrScanner = ({
     try {
       await stopCamera();
 
+      // Ensure viewport element is visible and active in layout before html5-qrcode measures dimensions
+      setIsScanning(true);
+      const viewportEl = document.getElementById(scannerContainerId);
+      if (viewportEl) {
+        viewportEl.classList.remove('scanner-collapsed');
+        viewportEl.classList.add('scanner-active');
+        viewportEl.style.display = 'block';
+      }
+
       const scanner = new Html5Qrcode(scannerContainerId);
       html5QrCodeRef.current = scanner;
 
@@ -266,9 +279,19 @@ const StudentQrScanner = ({
           // Continuous frame scan callback
         }
       );
-      setIsScanning(true);
+
+      // Ensure video element plays inline with proper attributes on mobile browsers
+      const videoEl = viewportEl ? viewportEl.querySelector('video') : null;
+      if (videoEl) {
+        videoEl.setAttribute('playsinline', 'true');
+        videoEl.setAttribute('autoplay', 'true');
+        videoEl.setAttribute('muted', 'true');
+        videoEl.playsInline = true;
+        videoEl.muted = true;
+      }
     } catch (err) {
       setCameraError('Camera access was not granted or is unavailable on this device. You can manually enter or paste the 5-second dynamic code below.');
+      await stopCamera();
       setIsScanning(false);
     }
   };
