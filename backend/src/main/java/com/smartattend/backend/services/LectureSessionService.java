@@ -241,11 +241,46 @@ public class LectureSessionService {
     }
 
     @Transactional
-    public void deleteSession(Long id) {
-        if (!lectureSessionRepository.existsById(id)) {
-            throw new IllegalArgumentException("Lecture session not found with ID: " + id);
+    public void deleteSession(Long id, String requestingUsername, String requestingRole) {
+        LectureSession session = lectureSessionRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Lecture session not found with ID: " + id));
+
+        boolean isAdmin = "ROLE_ADMIN".equalsIgnoreCase(requestingRole) || "ADMIN".equalsIgnoreCase(requestingRole);
+        boolean isFaculty = "ROLE_FACULTY".equalsIgnoreCase(requestingRole) || "ROLE_TEACHER".equalsIgnoreCase(requestingRole)
+                || "FACULTY".equalsIgnoreCase(requestingRole) || "TEACHER".equalsIgnoreCase(requestingRole);
+
+        if (!isAdmin && !isFaculty) {
+            throw new AccessDeniedException("Access denied: Only Faculty and Admin can delete class sessions.");
         }
-        lectureSessionRepository.deleteById(id);
+
+        if (isFaculty && !isAdmin) {
+            if (session.getFacultyId() == null || !session.getFacultyId().equalsIgnoreCase(requestingUsername)) {
+                throw new AccessDeniedException("Access denied: Faculty can only delete class sessions they themselves created.");
+            }
+        }
+
+        // Cascade deletion of attendance records linked to this session
+        if (session.getSessionCode() != null && !session.getSessionCode().trim().isEmpty()) {
+            List<Attendance> linkedAttendance = attendanceRepository.findBySessionCode(session.getSessionCode());
+            if (linkedAttendance != null && !linkedAttendance.isEmpty()) {
+                attendanceRepository.deleteAll(linkedAttendance);
+            }
+        }
+
+        lectureSessionRepository.delete(session);
+    }
+
+    @Transactional
+    public void deleteSession(Long id) {
+        LectureSession session = lectureSessionRepository.findById(id)
+                .orElseThrow(() -> new IllegalArgumentException("Lecture session not found with ID: " + id));
+        if (session.getSessionCode() != null && !session.getSessionCode().trim().isEmpty()) {
+            List<Attendance> linkedAttendance = attendanceRepository.findBySessionCode(session.getSessionCode());
+            if (linkedAttendance != null && !linkedAttendance.isEmpty()) {
+                attendanceRepository.deleteAll(linkedAttendance);
+            }
+        }
+        lectureSessionRepository.delete(session);
     }
 
     public List<Attendance> getAttendanceForSession(String sessionCode) {

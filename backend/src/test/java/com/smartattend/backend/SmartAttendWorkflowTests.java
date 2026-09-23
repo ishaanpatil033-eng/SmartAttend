@@ -17,6 +17,7 @@ import org.springframework.mock.web.MockHttpSession;
 import org.springframework.test.context.TestPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import java.time.LocalTime;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -447,5 +448,224 @@ public class SmartAttendWorkflowTests {
                 .session(studentSession))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].title").value("Quiz Scheduled"));
+    }
+
+    // =========================================================================
+    // 7. JAVA / FSJP CANONICAL SEED IDEMPOTENCY & INITIAL STATE VERIFICATION
+    // =========================================================================
+
+    @Test
+    @DisplayName("7. Java/FSJP seed is idempotent: repeated startup preserves exactly 1 course, 0 sessions, 0 attendance records, 0 tokens")
+    void testJavaFsjpSeedIdempotencyAndInitialCounts() {
+        // Clean everything to test cold startup
+        attendanceRepository.deleteAll();
+        qrTokenRepository.deleteAll();
+        deviceBindingRepository.deleteAll();
+        lectureSessionRepository.deleteAll();
+        courseRepository.deleteAll();
+        studentRepository.deleteAll();
+        userAccountRepository.deleteAll();
+
+        // 1st Startup
+        userAccountService.initDefaultUsers();
+
+        assertEquals(1, courseRepository.count(), "First startup must create exactly 1 course");
+        Course fsjp1 = courseRepository.findByCourseId("FSJP").orElseThrow();
+        assertEquals("Java", fsjp1.getCourseName());
+        assertEquals("123456", fsjp1.getAssignedFacultyId());
+        assertEquals("Prof. Faculty", fsjp1.getAssignedFacultyName());
+
+        assertEquals(1, studentRepository.count(), "First startup must have exactly 1 student");
+        Student student1 = studentRepository.findByStudentId("12345678").orElseThrow();
+        assertEquals("Student 12345678", student1.getStudentName());
+        assertEquals("A", student1.getDivision());
+
+        assertEquals(0, lectureSessionRepository.count(), "Startup must create 0 lecture sessions");
+        assertEquals(0, attendanceRepository.count(), "Startup must create 0 attendance records");
+        assertEquals(0, qrTokenRepository.count(), "Startup must create 0 active QR tokens");
+
+        // 2nd Startup (restarting Spring Boot)
+        userAccountService.initDefaultUsers();
+
+        assertEquals(1, courseRepository.count(), "Second startup must still have exactly 1 course (no duplicates)");
+        Course fsjp2 = courseRepository.findByCourseId("FSJP").orElseThrow();
+        assertEquals("Java", fsjp2.getCourseName());
+        assertEquals("123456", fsjp2.getAssignedFacultyId());
+
+        assertEquals(1, studentRepository.count(), "Second startup must still have exactly 1 student");
+        assertEquals(0, lectureSessionRepository.count(), "Second startup must still have 0 lecture sessions");
+        assertEquals(0, attendanceRepository.count(), "Second startup must still have 0 attendance records");
+        assertEquals(0, qrTokenRepository.count(), "Second startup must still have 0 active QR tokens");
+    }
+
+    // =========================================================================
+    // 8. END-TO-END COURSE -> FACULTY -> SESSION -> QR -> STUDENT -> ATTENDANCE
+    // =========================================================================
+
+    @Test
+    @DisplayName("8. End-to-end Course -> Faculty -> Session -> Dynamic QR -> Student -> Attendance -> Cascade Delete")
+    void testEndToEndJavaWorkflowAndSessionSecurity() throws Exception {
+        // Clean database and seed canonical state
+        attendanceRepository.deleteAll();
+        qrTokenRepository.deleteAll();
+        deviceBindingRepository.deleteAll();
+        lectureSessionRepository.deleteAll();
+        courseRepository.deleteAll();
+        studentRepository.deleteAll();
+        userAccountRepository.deleteAll();
+
+        userAccountService.initDefaultUsers();
+
+        // 1. Faculty 123456 logs in and sees Java / FSJP under My Assigned Courses
+        MockHttpSession facultySession = loginAs("123456", "123456@edu");
+
+        mockMvc.perform(get("/api/courses")
+                .session(facultySession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].courseId").value("FSJP"))
+                .andExpect(jsonPath("$[0].courseName").value("Java"))
+                .andExpect(jsonPath("$[0].assignedFacultyId").value("123456"));
+
+        // 2. Faculty 123456 creates a class session for Java (FSJP)
+        LectureSession newSession = new LectureSession();
+        newSession.setCourseId("FSJP");
+        newSession.setCourseName("Java");
+        newSession.setLectureType("THEORY");
+        newSession.setDivision("A");
+        newSession.setBatch("ALL");
+        newSession.setSessionDate(java.time.LocalDate.now());
+        newSession.setSessionTime("10:00 AM");
+
+        MvcResult createSessionResult = mockMvc.perform(post("/api/classes")
+                .session(facultySession)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(newSession)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.courseId").value("FSJP"))
+                .andExpect(jsonPath("$.facultyId").value("123456"))
+                .andReturn();
+
+        LectureSession createdSession = objectMapper.readValue(createSessionResult.getResponse().getContentAsString(), LectureSession.class);
+        String sessionCode = createdSession.getSessionCode();
+        Long sessionId = createdSession.getId();
+        assertNotNull(sessionCode);
+
+        // 3. Faculty launches 5-second dynamic QR
+        MvcResult qrResult = mockMvc.perform(post("/api/attendance/qr/generate")
+                .session(facultySession)
+                .param("courseId", "FSJP")
+                .param("sessionCode", sessionCode))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.token").isNotEmpty())
+                .andExpect(jsonPath("$.expiresInSeconds").value(5))
+                .andReturn();
+
+        String qrToken = objectMapper.readTree(qrResult.getResponse().getContentAsString()).get("token").asText();
+
+        // 4. Another faculty (seed "other_faculty") tries to delete Faculty 123456's session -> Forbidden 403
+        seedUserIfNotExists("other_faculty", "Faculty@123", "ROLE_FACULTY", null, "Other Faculty", "other@smartattend.edu");
+        MockHttpSession otherFacultySession = loginAs("other_faculty", "Faculty@123");
+
+        mockMvc.perform(delete("/api/classes/" + sessionId)
+                .session(otherFacultySession))
+                .andExpect(status().isForbidden());
+
+        // 5. Student 12345678 logs in and verifies Course Java (FSJP) is enrolled
+        MockHttpSession studentSession = loginAs("12345678", "12345678@apsit");
+
+        mockMvc.perform(get("/api/courses")
+                .session(studentSession))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].courseId").value("FSJP"));
+
+        // 6. Student scans with GPS OUTSIDE geofence (e.g. lat 19.5, lon 73.0) -> Rejected
+        com.smartattend.backend.dtos.QrScanRequest outOfGeofenceReq = new com.smartattend.backend.dtos.QrScanRequest();
+        outOfGeofenceReq.setCourseId("FSJP");
+        outOfGeofenceReq.setSessionCode(sessionCode);
+        outOfGeofenceReq.setQrToken(qrToken);
+        outOfGeofenceReq.setLatitude(19.5000);
+        outOfGeofenceReq.setLongitude(73.0000);
+        outOfGeofenceReq.setAccuracy(10.0);
+        outOfGeofenceReq.setDeviceFingerprint("FP-TEST-STUDENT-DEVICE");
+
+        mockMvc.perform(post("/api/attendance/qr/scan")
+                .session(studentSession)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(outOfGeofenceReq)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("outside the allowed classroom area")));
+
+        // 7. Student scans with VALID classroom coordinates (19.0760, 72.8777 within 100m) -> PRESENT 201 Created
+        com.smartattend.backend.dtos.QrScanRequest validScanReq = new com.smartattend.backend.dtos.QrScanRequest();
+        validScanReq.setCourseId("FSJP");
+        validScanReq.setSessionCode(sessionCode);
+        validScanReq.setQrToken(qrToken);
+        validScanReq.setLatitude(19.0760);
+        validScanReq.setLongitude(72.8777);
+        validScanReq.setAccuracy(15.0);
+        validScanReq.setDeviceFingerprint("FP-TEST-STUDENT-DEVICE");
+
+        mockMvc.perform(post("/api/attendance/qr/scan")
+                .session(studentSession)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(validScanReq)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.success").value(true))
+                .andExpect(jsonPath("$.attendance.attendanceStatus").value("PRESENT"));
+
+        // 8a. Re-scanning the consumed token -> Rejected 400 Bad Request (already consumed/used)
+        mockMvc.perform(post("/api/attendance/qr/scan")
+                .session(studentSession)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(validScanReq)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("already been used")));
+
+        // 8b. Scanning with a NEW live token for the same session -> Rejected 409 Conflict (Duplicate student attendance)
+        MvcResult nextQrResult = mockMvc.perform(post("/api/attendance/qr/generate")
+                .session(facultySession)
+                .param("courseId", "FSJP")
+                .param("sessionCode", sessionCode))
+                .andExpect(status().isOk())
+                .andReturn();
+        String nextQrToken = objectMapper.readTree(nextQrResult.getResponse().getContentAsString()).get("token").asText();
+
+        validScanReq.setQrToken(nextQrToken);
+        mockMvc.perform(post("/api/attendance/qr/scan")
+                .session(studentSession)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(validScanReq)))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("already been marked")));
+
+        // 9. Expired QR scan -> Rejected
+        AttendanceQrToken expiredTokenEntity = new AttendanceQrToken("EXPIRED-FSJP-TOKEN", "FSJP", sessionCode, java.time.Instant.now().minusSeconds(20), java.time.Instant.now().minusSeconds(10));
+        qrTokenRepository.save(expiredTokenEntity);
+
+        com.smartattend.backend.dtos.QrScanRequest expiredScanReq = new com.smartattend.backend.dtos.QrScanRequest();
+        expiredScanReq.setCourseId("FSJP");
+        expiredScanReq.setSessionCode(sessionCode);
+        expiredScanReq.setQrToken("EXPIRED-FSJP-TOKEN");
+        expiredScanReq.setLatitude(19.0760);
+        expiredScanReq.setLongitude(72.8777);
+        expiredScanReq.setAccuracy(15.0);
+        expiredScanReq.setDeviceFingerprint("FP-TEST-STUDENT-DEVICE-2");
+
+        mockMvc.perform(post("/api/attendance/qr/scan")
+                .session(studentSession)
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(objectMapper.writeValueAsString(expiredScanReq)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("expired")));
+
+        // 10. Faculty deletes their own session -> 200 OK and cascaded attendance deleted
+        assertEquals(1, attendanceRepository.count());
+
+        mockMvc.perform(delete("/api/classes/" + sessionId)
+                .session(facultySession))
+                .andExpect(status().isOk());
+
+        assertEquals(0, lectureSessionRepository.count());
+        assertEquals(0, attendanceRepository.count());
     }
 }

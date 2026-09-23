@@ -14,6 +14,7 @@ const StudentQrScanner = ({
   const [qrToken, setQrToken] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  const [scanStage, setScanStage] = useState('idle'); // 'idle' | 'scanning' | 'verifying_location' | 'submitting' | 'success'
   const [cameraError, setCameraError] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [locationStatus, setLocationStatus] = useState('idle'); // 'idle' | 'locating' | 'ready' | 'denied'
@@ -116,7 +117,6 @@ const StudentQrScanner = ({
 
     // 2. If no location yet (e.g. instant scan within first second), briefly wait without blocking indefinitely
     setLocationStatus('locating');
-    setErrorMsg('Getting your location. Please keep the scanner open...');
 
     return new Promise((resolve, reject) => {
       let resolved = false;
@@ -261,20 +261,19 @@ const StudentQrScanner = ({
       }
 
       setSubmitting(true);
+      setScanStage('verifying_location');
 
       // 1. Acquire real GPS coordinates (instantaneous via pre-warmed memory cache)
       let coords;
       try {
         coords = await getEffectiveLocation();
+        setScanStage('submitting');
       } catch (geoErr) {
         setLocationStatus('denied');
         setSubmitting(false);
         hasScannedRef.current = false;
-        if (geoErr?.code === 1) {
-          setErrorMsg('Attendance cannot be marked without location verification. Location permission was denied.');
-        } else {
-          setErrorMsg(geoErr?.message || 'Attendance rejected: Location unavailable or GPS timed out. Please enable device location.');
-        }
+        setScanStage('idle');
+        setErrorMsg('We could not confirm that you are inside the allowed classroom area. Please make sure Location is enabled and that you are physically inside the configured classroom area.');
         return;
       }
 
@@ -302,37 +301,64 @@ const StudentQrScanner = ({
             studentName: attendanceRecord.student?.studentName || currentStudentName,
             courseId: activeCourse,
             courseName: attendanceRecord.course?.courseName || currentCourseName,
+            sessionCode: attendanceRecord.sessionCode || sessionCode || 'Class Session',
             time: attendanceRecord.attendanceTime || new Date().toLocaleTimeString(),
             date: attendanceRecord.attendanceDate || new Date().toISOString().split('T')[0],
             status: attendanceRecord.attendanceStatus || 'PRESENT'
           });
           setQrToken('');
+          setScanStage('success');
           await stopCamera();
         } else {
           hasScannedRef.current = false;
-          setErrorMsg(result?.error || 'Failed to mark attendance. Please verify with instructor.');
+          setScanStage('idle');
+          setErrorMsg(result?.error || 'This QR code is not valid for this class session.');
         }
       } catch (err) {
         hasScannedRef.current = false;
-        const rawErr = err.response?.data?.error || err.message || 'Could not connect to attendance server.';
-        
-        // Human-friendly security classification
+        setScanStage('idle');
+        const rawErr = err.response?.data?.error || err.message || '';
+        const rawLower = rawErr.toLowerCase();
+
+        // Exact human-friendly error mapping
         if (err.response?.status === 401) {
           setErrorMsg('Your session has expired. Please log in again to mark attendance.');
-        } else if (rawErr.toLowerCase().includes('outside the allowed classroom area') || rawErr.toLowerCase().includes('geofence')) {
-          setErrorMsg('Attendance rejected: you are outside the allowed classroom area.');
-        } else if (rawErr.toLowerCase().includes('gps accuracy is insufficient')) {
-          setErrorMsg('Attendance rejected: GPS accuracy is insufficient. Please move to an open area and retry.');
-        } else if (rawErr.toLowerCase().includes('device has already marked attendance for another student') || rawErr.toLowerCase().includes('proxy attendance rejected')) {
+        } else if (rawLower.includes('expired')) {
+          setErrorMsg('This QR code has expired. Please scan the latest QR displayed by your faculty.');
+        } else if (rawLower.includes('already been marked') || rawLower.includes('already marked') || err.response?.status === 409) {
+          setErrorMsg('Your attendance is already marked for this session.');
+        } else if (
+          rawLower.includes('outside the allowed classroom area') ||
+          rawLower.includes('geofence') ||
+          rawLower.includes('gps accuracy is insufficient') ||
+          rawLower.includes('location permission required')
+        ) {
+          setErrorMsg('We could not confirm that you are inside the allowed classroom area. Please make sure Location is enabled and that you are physically inside the configured classroom area.');
+        } else if (
+          rawLower.includes('belongs to course') ||
+          rawLower.includes('division') ||
+          rawLower.includes('batch') ||
+          rawLower.includes('wrong course') ||
+          rawLower.includes('not enrolled')
+        ) {
+          setErrorMsg('This QR code does not belong to your enrolled course.');
+        } else if (
+          rawLower.includes('invalid qr') ||
+          rawLower.includes('not valid') ||
+          rawLower.includes('token not found') ||
+          rawLower.includes('already been used') ||
+          rawLower.includes('consumed')
+        ) {
+          setErrorMsg('This QR code is not valid for this class session.');
+        } else if (
+          rawLower.includes('device has already marked') ||
+          rawLower.includes('proxy attendance rejected')
+        ) {
           setErrorMsg('Attendance rejected: This device has already marked attendance for another student in this lecture session.');
-        } else if (rawErr.toLowerCase().includes('already been marked') || err.response?.status === 409) {
-          setErrorMsg('Attendance has already been marked for this lecture session. Duplicate submissions are prevented.');
-        } else if (rawErr.toLowerCase().includes('expired')) {
-          setErrorMsg('This QR token has expired! Tokens rotate every 5 seconds for security. Please scan the current code displayed on the teacher\'s screen.');
-        } else if (rawErr.toLowerCase().includes('already been used') || rawErr.toLowerCase().includes('consumed')) {
-          setErrorMsg('This QR code has already been consumed by another scan. Please scan the newly refreshed live QR code.');
+        } else if (!err.response || err.code === 'ECONNABORTED' || rawLower.includes('network error') || rawLower.includes('failed to fetch')) {
+          setErrorMsg('SmartAttend is temporarily unable to connect to the server. Please wait a moment and try again.');
         } else {
-          setErrorMsg(rawErr);
+          setErrorMsg(rawErr || 'SmartAttend is temporarily unable to connect to the server. Please wait a moment and try again.');
         }
       } finally {
         setSubmitting(false);
@@ -347,6 +373,7 @@ const StudentQrScanner = ({
     setCameraError('');
     setSuccessData(null);
     hasScannedRef.current = false;
+    setScanStage('scanning');
 
     try {
       await stopCamera();
@@ -391,9 +418,10 @@ const StudentQrScanner = ({
         videoEl.muted = true;
       }
     } catch (err) {
-      setCameraError('Camera access was not granted or is unavailable on this device. You can manually enter or paste the 5-second dynamic code below.');
+      setCameraError('Camera access is required to scan the attendance QR.');
       await stopCamera();
       setIsScanning(false);
+      setScanStage('idle');
     }
   };
 
@@ -410,6 +438,7 @@ const StudentQrScanner = ({
     setQrToken('');
     setErrorMsg('');
     setCameraError('');
+    setScanStage('idle');
     hasScannedRef.current = false;
   };
 
@@ -502,30 +531,105 @@ const StudentQrScanner = ({
         </div>
       </div>
 
-      {/* 3. STEP-BY-STEP GUIDANCE RIBBON */}
-      <div className="scanner-steps-ribbon">
-        <div className="scanner-step-item">
-          <div className="scanner-step-number">1</div>
-          <div className="scanner-step-text">
-            <strong>Check Screen</strong>
-            <span>Observe the live 5-second rotating QR code on the classroom projector.</span>
+      {/* 3. PRE-SCAN GUIDANCE CHECKLIST (Visible before scanning) */}
+      {!isScanning && !successData && (
+        <div className="card pre-scan-guidance-card" style={{ marginBottom: '24px', background: 'linear-gradient(135deg, #f8fafc 0%, #eff6ff 100%)', border: '1px solid #bfdbfe', padding: '24px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '16px' }}>
+            <div>
+              <span className="eyebrow" style={{ color: '#1d4ed8' }}>Attendance Verification Checklist</span>
+              <h3 style={{ margin: '4px 0 6px 0', fontSize: '1.25rem', color: '#1e3a8a', fontWeight: 800 }}>
+                Course: {currentCourseName} ({courseId || 'FSJP'})
+              </h3>
+              <p style={{ margin: 0, fontSize: '0.9rem', color: '#3b82f6', fontWeight: 600 }}>
+                Session: <strong>{sessionCode || 'Active Class Session'}</strong> &bull; Student: <strong>{currentStudentName} (#{studentId})</strong>
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn primary-btn"
+              onClick={startCamera}
+              style={{ padding: '12px 24px', fontSize: '1rem', fontWeight: 800, display: 'inline-flex', alignItems: 'center', gap: '8px', boxShadow: '0 4px 14px rgba(37, 99, 235, 0.3)' }}
+            >
+              📷 Scan QR &amp; Mark Attendance
+            </button>
+          </div>
+
+          <div style={{ marginTop: '18px', display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '12px' }}>
+            <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ background: '#dbeafe', color: '#1d4ed8', width: '22px', height: '22px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 800 }}>1</span>
+                Enable Location
+              </div>
+              <p style={{ margin: '6px 0 0 0', fontSize: '0.8rem', color: '#64748b', lineHeight: 1.4 }}>Make sure device location / GPS is turned ON in your browser.</p>
+            </div>
+
+            <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ background: '#dbeafe', color: '#1d4ed8', width: '22px', height: '22px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 800 }}>2</span>
+                Be Inside Classroom
+              </div>
+              <p style={{ margin: '6px 0 0 0', fontSize: '0.8rem', color: '#64748b', lineHeight: 1.4 }}>Physical presence inside the allowed classroom area is verified.</p>
+            </div>
+
+            <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ background: '#dbeafe', color: '#1d4ed8', width: '22px', height: '22px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 800 }}>3</span>
+                Scan Live QR
+              </div>
+              <p style={{ margin: '6px 0 0 0', fontSize: '0.8rem', color: '#64748b', lineHeight: 1.4 }}>Aim your camera at the live 5-second QR rotating on the screen.</p>
+            </div>
+
+            <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <span style={{ background: '#dbeafe', color: '#1d4ed8', width: '22px', height: '22px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 800 }}>4</span>
+                Verify Attendance
+              </div>
+              <p style={{ margin: '6px 0 0 0', fontSize: '0.8rem', color: '#64748b', lineHeight: 1.4 }}>Instant verification and confirmation logged to your records.</p>
+            </div>
           </div>
         </div>
-        <div className="scanner-step-item">
-          <div className="scanner-step-number">2</div>
-          <div className="scanner-step-text">
-            <strong>Location Check</strong>
-            <span>Browser automatically verifies your presence inside the classroom geofence.</span>
-          </div>
+      )}
+
+      {/* DISTINCT SCANNING & SUBMISSION STATUS BANNER */}
+      {(isScanning || submitting) && (
+        <div
+          className="scanner-live-status-banner"
+          style={{
+            padding: '14px 20px',
+            borderRadius: '10px',
+            marginBottom: '20px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '14px',
+            fontWeight: 700,
+            fontSize: '1rem',
+            background: scanStage === 'verifying_location' ? '#fef3c7' : scanStage === 'submitting' ? '#e0e7ff' : '#dbeafe',
+            color: scanStage === 'verifying_location' ? '#92400e' : scanStage === 'submitting' ? '#3730a3' : '#1e40af',
+            border: `1px solid ${scanStage === 'verifying_location' ? '#fcd34d' : scanStage === 'submitting' ? '#c7d2fe' : '#93c5fd'}`,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
+          }}
+        >
+          <div
+            className="status-spinner-small"
+            style={{
+              width: '18px',
+              height: '18px',
+              border: '2px solid currentColor',
+              borderTopColor: 'transparent',
+              borderRadius: '50%',
+              animation: 'spin 0.8s linear infinite',
+              flexShrink: 0
+            }}
+          />
+          <span>
+            {scanStage === 'verifying_location'
+              ? 'Checking your classroom location... Please wait.'
+              : scanStage === 'submitting'
+              ? 'QR verified. Marking attendance...'
+              : 'Scanning current attendance QR...'}
+          </span>
         </div>
-        <div className="scanner-step-item">
-          <div className="scanner-step-number">3</div>
-          <div className="scanner-step-text">
-            <strong>Instant Log</strong>
-            <span>Attendance is recorded in MySQL and secured against duplicate or proxy scans.</span>
-          </div>
-        </div>
-      </div>
+      )}
 
       {/* 4. SUCCESS CELEBRATION CARD */}
       {successData && (
@@ -534,34 +638,34 @@ const StudentQrScanner = ({
             <div className="success-icon-badge">✓</div>
             <div>
               <span className="eyebrow" style={{ color: 'var(--color-success)' }}>Verification Confirmed</span>
-              <h2 className="success-title">Attendance Successfully Recorded!</h2>
+              <h2 className="success-title">✓ Attendance Marked Successfully</h2>
               <p className="success-subtitle">{successData.message}</p>
             </div>
           </div>
 
           <div className="success-details-grid">
             <div className="success-detail-box">
-              <span className="detail-label">Student Name</span>
-              <span className="detail-value">{successData.studentName}</span>
-              <span className="detail-subvalue">ID: #{successData.studentId}</span>
+              <span className="detail-label">Course</span>
+              <span className="detail-value">{successData.courseName} ({successData.courseId})</span>
+              <span className="detail-subvalue">Student: {successData.studentName} (#{successData.studentId})</span>
             </div>
 
             <div className="success-detail-box">
-              <span className="detail-label">Course Verified</span>
-              <span className="detail-value">{successData.courseId}</span>
-              <span className="detail-subvalue">{successData.courseName}</span>
+              <span className="detail-label">Session</span>
+              <span className="detail-value">{sessionCode || successData.sessionCode || 'Class Session'}</span>
+              <span className="detail-subvalue">Dynamic QR Token Verified</span>
             </div>
 
             <div className="success-detail-box">
-              <span className="detail-label">Status Logged</span>
-              <span className="detail-value" style={{ color: 'var(--color-success)' }}>
-                ● {successData.status}
+              <span className="detail-label">Status</span>
+              <span className="detail-value" style={{ color: '#16a34a', fontWeight: 800 }}>
+                ● {successData.status || 'PRESENT'}
               </span>
               <span className="detail-subvalue">Verified by Spring Boot</span>
             </div>
 
             <div className="success-detail-box">
-              <span className="detail-label">Timestamp</span>
+              <span className="detail-label">Time</span>
               <span className="detail-value">{successData.time}</span>
               <span className="detail-subvalue">Date: {successData.date}</span>
             </div>
@@ -626,7 +730,7 @@ const StudentQrScanner = ({
                 className={`btn ${isScanning ? 'danger-btn' : 'primary-btn'} camera-toggle-btn`}
                 onClick={isScanning ? stopCamera : startCamera}
               >
-                {isScanning ? '⏹ Stop Camera' : '📷 Open Camera Scanner'}
+                {isScanning ? '⏹ Stop Camera' : '📷 Scan QR & Mark Attendance'}
               </button>
             </div>
 
@@ -644,9 +748,9 @@ const StudentQrScanner = ({
                 <div className="camera-idle-placeholder" onClick={startCamera}>
                   <div className="idle-camera-icon">📷</div>
                   <h4>Camera is currently inactive</h4>
-                  <p>Click &quot;Open Camera Scanner&quot; to scan the live 5-second classroom code.</p>
+                  <p>Click &quot;Scan QR &amp; Mark Attendance&quot; to scan the live 5-second classroom code.</p>
                   <button type="button" className="btn primary-btn" style={{ marginTop: '12px' }}>
-                    Activate Camera
+                    📷 Scan QR &amp; Mark Attendance
                   </button>
                 </div>
               )}

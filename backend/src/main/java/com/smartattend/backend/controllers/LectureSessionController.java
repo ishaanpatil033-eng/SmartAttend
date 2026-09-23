@@ -88,16 +88,27 @@ public class LectureSessionController {
         if (authentication == null || !authentication.isAuthenticated()) {
             return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
         }
-        boolean isAuthorized = authentication.getAuthorities().stream()
-                .anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()) || "ROLE_HOD".equals(a.getAuthority()));
-        if (!isAuthorized) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", "Access denied: Only Admin or HOD can delete class sessions."));
+        String username = authentication.getName();
+        boolean isAdmin = authentication.getAuthorities().stream().anyMatch(a -> "ROLE_ADMIN".equals(a.getAuthority()));
+        boolean isFaculty = authentication.getAuthorities().stream().anyMatch(a ->
+                "ROLE_FACULTY".equals(a.getAuthority()) || "ROLE_TEACHER".equals(a.getAuthority()));
+
+        if (!isAdmin && !isFaculty) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Access denied: Only Faculty and Admin can delete class sessions."));
         }
+
+        String role = isAdmin ? "ROLE_ADMIN" : "ROLE_FACULTY";
         try {
-            lectureSessionService.deleteSession(id);
+            lectureSessionService.deleteSession(id, username, role);
             return ResponseEntity.ok(Map.of("success", true, "message", "Class session deleted successfully."));
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", e.getMessage()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to delete session: " + e.getMessage()));
         }
     }
 

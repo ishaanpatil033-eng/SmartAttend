@@ -473,7 +473,7 @@ const StudentDashboard = ({ onOpenScanner, currentStudentId = 'STU101', onStuden
     (c) => c.lowAttendance
   );
 
-  const defaultCourseForScanner = summaryData?.courseSummaries?.[0]?.courseId || '';
+  const defaultCourseForScanner = summaryData?.courseSummaries?.[0]?.courseId || lmsCourses?.[0]?.courseId || 'FSJP';
 
   // Urgent notifications (Priority 1: Due Today, Priority 2: Due Tomorrow)
   const urgentNotifications = assignments.filter((a) => {
@@ -847,6 +847,125 @@ const StudentDashboard = ({ onOpenScanner, currentStudentId = 'STU101', onStuden
             Threshold: Courses falling below {LOW_ATTENDANCE_THRESHOLD}% attendance
           </div>
         </div>
+      </div>
+
+      {/* MY COURSES SECTION */}
+      <div className="card" style={{ marginBottom: '24px', border: '1.5px solid #cbd5e1', borderRadius: '12px', padding: '20px 24px', background: '#ffffff' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+          <div>
+            <span className="eyebrow" style={{ color: '#2563eb', fontWeight: 700, fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+              Enrolled Academic Subjects
+            </span>
+            <h2 style={{ margin: '4px 0 2px 0', fontSize: '1.3rem', color: '#0f172a' }}>
+              My Courses
+            </h2>
+            <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>
+              <strong>Course:</strong> Academic subject assigned to students and faculty. Students mark attendance for class sessions held in this course.
+            </p>
+          </div>
+          <span className="pill pill-info">
+            {lmsCourses.length > 0 ? lmsCourses.length : 1} Enrolled Subject(s)
+          </span>
+        </div>
+
+        {(!lmsCourses || lmsCourses.length === 0) ? (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '14px' }}>
+            <div
+              style={{
+                border: '1.5px solid #e2e8f0',
+                borderRadius: '10px',
+                padding: '16px',
+                background: '#ffffff',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                display: 'flex',
+                flexDirection: 'column',
+                justifyContent: 'space-between'
+              }}
+            >
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#0f172a' }}>Java</h3>
+                  <span style={{ fontSize: '0.72rem', fontWeight: 700, background: '#dbeafe', color: '#1e40af', padding: '2px 8px', borderRadius: '5px' }}>
+                    THEORY
+                  </span>
+                </div>
+                <div style={{ fontSize: '0.85rem', color: '#475569', marginBottom: '14px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                  <div><strong>Course ID:</strong> FSJP</div>
+                  <div><strong>Faculty:</strong> Prof. Faculty (123456)</div>
+                  <div><strong>Cohort:</strong> FE • Div A • Batch ALL</div>
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  className="btn secondary-btn"
+                  style={{ flex: 1, padding: '7px 8px', fontSize: '0.82rem' }}
+                  onClick={() => setWorkspaceTab('coursework')}
+                >
+                  📖 View Course
+                </button>
+                <button
+                  type="button"
+                  className="btn primary-btn"
+                  style={{ flex: 1, padding: '7px 8px', fontSize: '0.82rem', background: '#2563eb', color: '#ffffff' }}
+                  onClick={() => onOpenScanner && onOpenScanner(selectedStudentId, 'FSJP')}
+                >
+                  📱 Mark Attendance
+                </button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '14px' }}>
+            {lmsCourses.map((c) => (
+              <div
+                key={c.id || c.courseId}
+                style={{
+                  border: '1.5px solid #e2e8f0',
+                  borderRadius: '10px',
+                  padding: '16px',
+                  background: '#ffffff',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.05)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  justifyContent: 'space-between'
+                }}
+              >
+                <div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#0f172a' }}>{c.courseName}</h3>
+                    <span style={{ fontSize: '0.72rem', fontWeight: 700, background: '#dbeafe', color: '#1e40af', padding: '2px 8px', borderRadius: '5px' }}>
+                      {c.courseType || 'THEORY'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: '#475569', marginBottom: '14px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                    <div><strong>Course ID:</strong> {c.courseId}</div>
+                    <div><strong>Faculty:</strong> {c.assignedFacultyName || c.assignedFacultyId || '123456'}</div>
+                    <div><strong>Cohort:</strong> {c.academicYear || 'FE'} • Div {c.division || 'A'} • Batch {c.batch || 'ALL'}</div>
+                  </div>
+                </div>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <button
+                    type="button"
+                    className="btn secondary-btn"
+                    style={{ flex: 1, padding: '7px 8px', fontSize: '0.82rem' }}
+                    onClick={() => setWorkspaceTab('coursework')}
+                  >
+                    📖 View Course
+                  </button>
+                  <button
+                    type="button"
+                    className="btn primary-btn"
+                    style={{ flex: 1, padding: '7px 8px', fontSize: '0.82rem', background: '#2563eb', color: '#ffffff' }}
+                    onClick={() => onOpenScanner && onOpenScanner(selectedStudentId, c.courseId)}
+                  >
+                    📱 Mark Attendance
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* 5. COURSE ATTENDANCE BREAKDOWN */}

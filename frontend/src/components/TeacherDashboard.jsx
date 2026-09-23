@@ -20,7 +20,8 @@ import {
   downloadLmsFile,
   deleteAnnouncement,
   getDefaulterReport,
-  exportDefaulterExcel
+  exportDefaulterExcel,
+  deleteClass
 } from '../services/api.js';
 
 const LOW_ATTENDANCE_THRESHOLD = 75.0;
@@ -81,6 +82,8 @@ const TeacherDashboard = ({ onOpenQrSession, onSelectCourse, selectedCourseId, c
   });
   const [creatingClass, setCreatingClass] = useState(false);
   const [classActionMsg, setClassActionMsg] = useState('');
+  const [deleteConfirmSession, setDeleteConfirmSession] = useState(null);
+  const [deletingSessionId, setDeletingSessionId] = useState(null);
 
   const getBatchesForDivision = (div) => {
     if (div === 'B') return ['B1', 'B2', 'B3'];
@@ -227,6 +230,22 @@ const TeacherDashboard = ({ onOpenQrSession, onSelectCourse, selectedCourseId, c
       await loadClasses();
     } catch (err) {
       alert(err.response?.data?.error || 'Could not update session status.');
+    }
+  };
+
+  const handleDeleteSession = async (session) => {
+    if (!session) return;
+    try {
+      setDeletingSessionId(session.id);
+      await deleteClass(session.id);
+      setDeleteConfirmSession(null);
+      setClassActionMsg(`✓ Class session "${session.sessionCode || session.courseName}" and its attendance records were deleted successfully.`);
+      setTimeout(() => setClassActionMsg(''), 6000);
+      await loadClasses();
+    } catch (err) {
+      alert(err.response?.data?.error || err.message || 'Failed to delete class session.');
+    } finally {
+      setDeletingSessionId(null);
     }
   };
 
@@ -625,6 +644,100 @@ const TeacherDashboard = ({ onOpenQrSession, onSelectCourse, selectedCourseId, c
             </div>
           </div>
 
+          {/* MY ASSIGNED COURSES */}
+          <div className="card" style={{ marginBottom: '20px', border: '1.5px solid #cbd5e1', borderRadius: '12px', padding: '20px 24px', background: '#ffffff' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap', gap: '10px' }}>
+              <div>
+                <span className="eyebrow" style={{ color: '#2563eb', fontWeight: 700, fontSize: '0.78rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                  Academic Assignment
+                </span>
+                <h2 style={{ margin: '4px 0 2px 0', fontSize: '1.3rem', color: '#0f172a' }}>
+                  My Assigned Courses
+                </h2>
+                <p style={{ margin: 0, color: '#64748b', fontSize: '0.85rem' }}>
+                  <strong>Course:</strong> Academic subject assigned to students and faculty.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="btn primary-btn"
+                onClick={() => {
+                  setClassForm(prev => ({ ...prev, courseId: courseId || availableCourses[0]?.courseId || 'FSJP' }));
+                  setShowCreateClassModal(true);
+                }}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '0.88rem' }}
+              >
+                <span>+</span>
+                <span>Create Class Session</span>
+              </button>
+            </div>
+
+            {availableCourses.length === 0 ? (
+              <p style={{ color: '#64748b', margin: 0, fontSize: '0.9rem' }}>
+                No courses currently assigned to your faculty account.
+              </p>
+            ) : (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '14px' }}>
+                {availableCourses.map((c) => {
+                  const isCurrent = c.courseId === courseId;
+                  return (
+                    <div
+                      key={c.id || c.courseId}
+                      style={{
+                        border: isCurrent ? '2px solid #2563eb' : '1px solid #e2e8f0',
+                        borderRadius: '10px',
+                        padding: '16px',
+                        background: isCurrent ? '#f0f7ff' : '#fafafa',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        justifyContent: 'space-between'
+                      }}
+                    >
+                      <div>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '8px' }}>
+                          <h3 style={{ margin: 0, fontSize: '1.15rem', color: '#0f172a' }}>{c.courseName}</h3>
+                          <span style={{ fontSize: '0.72rem', fontWeight: 700, background: '#dbeafe', color: '#1e40af', padding: '2px 8px', borderRadius: '5px' }}>
+                            {c.courseType || 'THEORY'}
+                          </span>
+                        </div>
+                        <div style={{ fontSize: '0.85rem', color: '#475569', marginBottom: '12px', display: 'flex', flexDirection: 'column', gap: '3px' }}>
+                          <div><strong>Course ID:</strong> {c.courseId}</div>
+                          <div><strong>Faculty:</strong> {currentUser?.username || c.assignedFacultyId || '123456'}</div>
+                          <div><strong>Cohort:</strong> {c.academicYear || 'FE'} • Div {c.division || 'A'} • Batch {c.batch || 'ALL'}</div>
+                        </div>
+                      </div>
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                        <button
+                          type="button"
+                          className="btn secondary-btn"
+                          style={{ flex: 1, padding: '7px 8px', fontSize: '0.82rem' }}
+                          onClick={() => {
+                            setCourseId(c.courseId);
+                            if (onSelectCourse) onSelectCourse(c.courseId);
+                          }}
+                        >
+                          {isCurrent ? '✓ Selected' : 'View Course'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn primary-btn"
+                          style={{ flex: 1, padding: '7px 8px', fontSize: '0.82rem' }}
+                          onClick={() => {
+                            setCourseId(c.courseId);
+                            setClassForm(prev => ({ ...prev, courseId: c.courseId }));
+                            setShowCreateClassModal(true);
+                          }}
+                        >
+                          + Class Session
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
           {/* Course Identity Strip */}
           <div className="teacher-profile-info-strip">
             <div className="teacher-avatar-badge">
@@ -970,6 +1083,16 @@ const TeacherDashboard = ({ onOpenQrSession, onSelectCourse, selectedCourseId, c
                           <span className="lecture-meta-value">{cls.sessionDate} • {cls.sessionTime}</span>
                         </div>
                         <div className="lecture-meta-item">
+                          <span className="lecture-meta-label">Created by</span>
+                          <span className="lecture-meta-value">Faculty {cls.facultyId || currentUser?.username || '123456'}</span>
+                        </div>
+                        <div className="lecture-meta-item">
+                          <span className="lecture-meta-label">Status</span>
+                          <span className="lecture-meta-value" style={{ color: isActive ? '#15803d' : '#64748b', fontWeight: 600 }}>
+                            {isActive ? '● Active' : 'Completed'}
+                          </span>
+                        </div>
+                        <div className="lecture-meta-item">
                           <span className="lecture-meta-label">Cohort Year</span>
                           <span className="lecture-meta-value">{cls.academicYear || 'FE'}</span>
                         </div>
@@ -1026,10 +1149,63 @@ const TeacherDashboard = ({ onOpenQrSession, onSelectCourse, selectedCourseId, c
                           {isActive ? '⏹ End Session' : '▶ Reopen'}
                         </button>
                       </div>
+
+                      <button
+                        type="button"
+                        className="btn secondary-btn"
+                        style={{ fontSize: '0.82rem', padding: '6px 8px', color: '#b91c1c', borderColor: '#fca5a5' }}
+                        onClick={() => setDeleteConfirmSession(cls)}
+                        title="Delete this class session and remove linked attendance"
+                      >
+                        🗑 Delete Session
+                      </button>
                     </div>
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* DELETE SESSION CONFIRMATION MODAL */}
+          {deleteConfirmSession && (
+            <div className="modal-backdrop" onClick={() => setDeleteConfirmSession(null)}>
+              <div className="modal-card" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '480px', width: '90%', padding: '24px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+                  <span style={{ fontSize: '1.8rem' }}>⚠️</span>
+                  <div>
+                    <h3 style={{ margin: 0, color: '#991b1b', fontSize: '1.2rem' }}>Delete Class Session</h3>
+                    <p style={{ margin: '4px 0 0 0', fontSize: '0.85rem', color: '#64748b' }}>
+                      Permanent Deletion Confirmation
+                    </p>
+                  </div>
+                </div>
+                <p style={{ fontSize: '0.92rem', color: '#334155', lineHeight: 1.5, marginBottom: '16px' }}>
+                  Are you sure you want to delete session <strong>{deleteConfirmSession.sessionCode}</strong> ({deleteConfirmSession.courseName})?
+                  <br /><br />
+                  <span style={{ color: '#b91c1c', fontWeight: 600 }}>
+                    This will permanently remove the class session and its associated attendance records according to the academic data model.
+                  </span>
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
+                  <button
+                    type="button"
+                    className="btn secondary-btn"
+                    onClick={() => setDeleteConfirmSession(null)}
+                    disabled={deletingSessionId !== null}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className="btn danger-btn"
+                    onClick={() => handleDeleteSession(deleteConfirmSession)}
+                    disabled={deletingSessionId !== null}
+                    style={{ background: '#dc2626', color: '#fff', border: 'none', padding: '8px 16px' }}
+                  >
+                    {deletingSessionId === deleteConfirmSession.id ? 'Deleting...' : 'Delete Session'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
         </div>

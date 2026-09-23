@@ -1,5 +1,7 @@
 package com.smartattend.backend.services;
 
+import com.smartattend.backend.entities.Course;
+import com.smartattend.backend.repositories.CourseRepository;
 import com.smartattend.backend.dtos.UserInfoDto;
 import com.smartattend.backend.entities.LectureSession;
 import com.smartattend.backend.repositories.AttendanceRepository;
@@ -37,17 +39,20 @@ public class UserAccountService implements UserDetailsService {
     private final PasswordEncoder passwordEncoder;
     private final LectureSessionRepository lectureSessionRepository;
     private final AttendanceRepository attendanceRepository;
+    private final CourseRepository courseRepository;
 
     public UserAccountService(UserAccountRepository userAccountRepository,
                               StudentRepository studentRepository,
                               PasswordEncoder passwordEncoder,
                               LectureSessionRepository lectureSessionRepository,
-                              AttendanceRepository attendanceRepository) {
+                              AttendanceRepository attendanceRepository,
+                              CourseRepository courseRepository) {
         this.userAccountRepository = userAccountRepository;
         this.studentRepository = studentRepository;
         this.passwordEncoder = passwordEncoder;
         this.lectureSessionRepository = lectureSessionRepository;
         this.attendanceRepository = attendanceRepository;
+        this.courseRepository = courseRepository;
     }
 
     @Override
@@ -470,6 +475,28 @@ public class UserAccountService implements UserDetailsService {
         seedUserIfNotExists("123456", "123456@edu", "ROLE_FACULTY", null, "Prof. Faculty", "faculty123456@smartattend.edu");
         seedUserIfNotExists("12345678", "12345678@apsit", "ROLE_STUDENT", "12345678", "Student 12345678", "student12345678@smartattend.edu");
         seedStudentIfNotExists("12345678", "Student 12345678", "student12345678@smartattend.edu", "FE", 1, "A", "A1", "Computer Science");
+        seedCanonicalCourse("FSJP", "Java", "Computer Science", "A", "ALL", "FE", 1, "THEORY", "123456", "Prof. Faculty");
+    }
+
+    private void seedCanonicalCourse(String courseId, String courseName, String branch, String division, String batch,
+                                    String year, int semester, String courseType, String facultyId, String facultyName) {
+        Optional<Course> existingOpt = courseRepository.findByCourseId(courseId);
+        if (existingOpt.isEmpty()) {
+            Course c = new Course(courseId, courseName, branch, division, batch, year, semester, courseType, facultyId, facultyName);
+            courseRepository.save(c);
+        } else {
+            Course c = existingOpt.get();
+            c.setCourseName(courseName);
+            c.setBranch(branch);
+            c.setDivision(division);
+            c.setBatch(batch);
+            c.setAcademicYear(year);
+            c.setSemester(semester);
+            c.setCourseType(courseType);
+            c.setAssignedFacultyId(facultyId);
+            c.setAssignedFacultyName(facultyName);
+            courseRepository.save(c);
+        }
     }
 
     private void seedUserIfNotExists(String username, String plainPassword, String role, String studentId, String fullName, String email) {

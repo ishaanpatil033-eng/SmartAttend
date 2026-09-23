@@ -194,8 +194,8 @@ class LectureSessionTests {
     }
 
     @Test
-    @DisplayName("Admin or HOD can delete a scheduled class session")
-    void testDeleteSession() {
+    @DisplayName("Faculty can delete their own scheduled class session")
+    void testFacultyCanDeleteOwnSession() {
         LectureSession session = new LectureSession();
         session.setCourseId("CS201");
         session.setLectureType("THEORY");
@@ -204,7 +204,66 @@ class LectureSessionTests {
         LectureSession created = lectureSessionService.createLectureSession(session, "123456", "ROLE_FACULTY");
         assertNotNull(created.getId());
 
-        lectureSessionService.deleteSession(created.getId());
+        lectureSessionService.deleteSession(created.getId(), "123456", "ROLE_FACULTY");
         assertTrue(lectureSessionService.getSessionByCode(created.getSessionCode()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("Faculty cannot delete another faculty member's session")
+    void testFacultyCannotDeleteOtherFacultySession() {
+        LectureSession session = new LectureSession();
+        session.setCourseId("CS201");
+        session.setLectureType("THEORY");
+        session.setDivision("B");
+        session.setBatch("ALL");
+        LectureSession created = lectureSessionService.createLectureSession(session, "123456", "ROLE_FACULTY");
+        assertNotNull(created.getId());
+
+        AccessDeniedException ex = assertThrows(AccessDeniedException.class, () -> {
+            lectureSessionService.deleteSession(created.getId(), "other_faculty", "ROLE_FACULTY");
+        });
+        assertTrue(ex.getMessage().contains("Faculty can only delete class sessions they themselves created"));
+    }
+
+    @Test
+    @DisplayName("Student and HOD cannot delete class sessions")
+    void testStudentAndHodCannotDeleteSession() {
+        LectureSession session = new LectureSession();
+        session.setCourseId("CS201");
+        session.setLectureType("THEORY");
+        session.setDivision("B");
+        session.setBatch("ALL");
+        LectureSession created = lectureSessionService.createLectureSession(session, "123456", "ROLE_FACULTY");
+
+        assertThrows(AccessDeniedException.class, () -> {
+            lectureSessionService.deleteSession(created.getId(), "12345678", "ROLE_STUDENT");
+        });
+
+        assertThrows(AccessDeniedException.class, () -> {
+            lectureSessionService.deleteSession(created.getId(), "hod", "ROLE_HOD");
+        });
+    }
+
+    @Test
+    @DisplayName("Admin can delete any class session and cascade attendance records")
+    void testAdminCanDeleteAnySessionAndCascadeAttendance() {
+        LectureSession session = new LectureSession();
+        session.setCourseId("CS201");
+        session.setLectureType("THEORY");
+        session.setDivision("B");
+        session.setBatch("ALL");
+        LectureSession created = lectureSessionService.createLectureSession(session, "123456", "ROLE_FACULTY");
+
+        Course course = courseRepository.findByCourseId("CS201").orElseThrow();
+        Student student = studentRepository.findByStudentId("12345678").orElseThrow();
+        Attendance att = new Attendance(student, course, created.getSessionCode(), LocalDate.now(), LocalTime.now(), "PRESENT");
+        attendanceRepository.save(att);
+
+        assertEquals(1, attendanceRepository.findBySessionCode(created.getSessionCode()).size());
+
+        lectureSessionService.deleteSession(created.getId(), "admin", "ROLE_ADMIN");
+
+        assertTrue(lectureSessionService.getSessionByCode(created.getSessionCode()).isEmpty());
+        assertEquals(0, attendanceRepository.findBySessionCode(created.getSessionCode()).size());
     }
 }
