@@ -11,6 +11,7 @@ import TeacherQrDashboard from './components/TeacherQrDashboard.jsx';
 import StudentDashboard from './components/StudentDashboard.jsx';
 import StudentQrScanner from './components/StudentQrScanner.jsx';
 import StudentCourseManagement from './components/StudentCourseManagement.jsx';
+import ErrorBoundary from './components/ErrorBoundary.jsx';
 import { getMe, logout } from './services/api.js';
 import './styles.css';
 
@@ -74,11 +75,11 @@ const App = () => {
   }, []);
 
   const handleOpenQrSession = (selectedCourse, sessionCode = '') => {
-    if (selectedCourse) {
-      setActiveCourseId(selectedCourse);
+    if (typeof selectedCourse === 'string' && selectedCourse.trim()) {
+      setActiveCourseId(selectedCourse.trim());
     }
-    if (sessionCode) {
-      setActiveSessionCode(sessionCode);
+    if (typeof sessionCode === 'string' && sessionCode.trim()) {
+      setActiveSessionCode(sessionCode.trim());
     }
     setActiveTab('teacher-qr');
   };
@@ -209,73 +210,81 @@ const App = () => {
       <div className="workspace-shell horizontal-workspace">
         <main className="workspace-main-content">
           <div className="app-container">
-            {activeTab === 'student-dashboard' && (
-              <StudentDashboard
-                onOpenScanner={handleOpenStudentScanner}
-                currentStudentId={activeStudentId}
-                onStudentChange={(id) => setActiveStudentId(id)}
-                currentUser={currentUser}
-                activeSubTab={activeSubTab}
-                onSubTabChange={(sub) => setActiveSubTab(sub)}
-              />
-            )}
-            {activeTab === 'student-scan' && (
-              <StudentQrScanner
-                initialStudentId={activeStudentId}
-                initialCourseId={activeCourseId}
-                initialSessionCode={activeSessionCode}
-                onBackToDashboard={() => {
-                  if (selectedRole === 'admin') {
-                    setActiveTab('admin-dashboard');
-                    setActiveSubTab('overview');
-                  } else {
-                    setActiveTab('student-dashboard');
-                    setActiveSubTab('overview');
-                  }
-                }}
-              />
-            )}
-            {activeTab === 'teacher-dashboard' && (
-              <TeacherDashboard
-                selectedCourseId={activeCourseId}
-                onSelectCourse={(course) => setActiveCourseId(course)}
-                onOpenQrSession={handleOpenQrSession}
-                currentUser={currentUser}
-                activeSubTab={activeSubTab}
-                onSubTabChange={(sub) => setActiveSubTab(sub)}
-              />
-            )}
-            {activeTab === 'teacher-qr' && (
-              <TeacherQrDashboard
-                initialCourseId={activeCourseId}
-                initialSessionCode={activeSessionCode}
-                onBackToDashboard={() => {
-                  if (selectedRole === 'admin') {
-                    setActiveTab('admin-dashboard');
-                    setActiveSubTab('classes');
-                  } else {
-                    setActiveTab('teacher-dashboard');
-                    setActiveSubTab('classes');
-                  }
-                }}
-              />
-            )}
-            {activeTab === 'admin-dashboard' && selectedRole !== 'hod' && (
-              <AdminDashboard
-                currentUser={currentUser}
-                activeSubTab={activeSubTab}
-                onSubTabChange={(sub) => setActiveSubTab(sub)}
-              />
-            )}
-            {(activeTab === 'hod-dashboard' || (selectedRole === 'hod' && activeTab === 'admin-dashboard')) && (
-              <HodDashboard
-                currentUser={currentUser}
-                activeSubTab={activeSubTab}
-                onSubTabChange={(sub) => setActiveSubTab(sub)}
-              />
-            )}
-            {activeTab === 'records' && <StudentCourseManagement />}
-            {activeTab === 'moodle' && <MoodleIntegration />}
+            <ErrorBoundary
+              onReset={() => {
+                const targetTab = roleTabMap[selectedRole] || 'student-dashboard';
+                setActiveTab(targetTab);
+                setActiveSubTab('overview');
+              }}
+            >
+              {activeTab === 'student-dashboard' && (
+                <StudentDashboard
+                  onOpenScanner={handleOpenStudentScanner}
+                  currentStudentId={activeStudentId}
+                  onStudentChange={(id) => setActiveStudentId(id)}
+                  currentUser={currentUser}
+                  activeSubTab={activeSubTab}
+                  onSubTabChange={(sub) => setActiveSubTab(sub)}
+                />
+              )}
+              {activeTab === 'student-scan' && (
+                <StudentQrScanner
+                  initialStudentId={activeStudentId}
+                  initialCourseId={activeCourseId}
+                  initialSessionCode={activeSessionCode}
+                  onBackToDashboard={() => {
+                    if (selectedRole === 'admin') {
+                      setActiveTab('admin-dashboard');
+                      setActiveSubTab('overview');
+                    } else {
+                      setActiveTab('student-dashboard');
+                      setActiveSubTab('overview');
+                    }
+                  }}
+                />
+              )}
+              {activeTab === 'teacher-dashboard' && (
+                <TeacherDashboard
+                  selectedCourseId={activeCourseId}
+                  onSelectCourse={(course) => setActiveCourseId(course)}
+                  onOpenQrSession={handleOpenQrSession}
+                  currentUser={currentUser}
+                  activeSubTab={activeSubTab}
+                  onSubTabChange={(sub) => setActiveSubTab(sub)}
+                />
+              )}
+              {activeTab === 'teacher-qr' && (
+                <TeacherQrDashboard
+                  initialCourseId={activeCourseId}
+                  initialSessionCode={activeSessionCode}
+                  onBackToDashboard={() => {
+                    if (selectedRole === 'admin') {
+                      setActiveTab('admin-dashboard');
+                      setActiveSubTab('classes');
+                    } else {
+                      setActiveTab('teacher-dashboard');
+                      setActiveSubTab('classes');
+                    }
+                  }}
+                />
+              )}
+              {activeTab === 'admin-dashboard' && selectedRole !== 'hod' && (
+                <AdminDashboard
+                  currentUser={currentUser}
+                  activeSubTab={activeSubTab}
+                  onSubTabChange={(sub) => setActiveSubTab(sub)}
+                />
+              )}
+              {(activeTab === 'hod-dashboard' || (selectedRole === 'hod' && activeTab === 'admin-dashboard')) && (
+                <HodDashboard
+                  currentUser={currentUser}
+                  activeSubTab={activeSubTab}
+                  onSubTabChange={(sub) => setActiveSubTab(sub)}
+                />
+              )}
+              {activeTab === 'records' && <StudentCourseManagement />}
+              {activeTab === 'moodle' && <MoodleIntegration />}
+            </ErrorBoundary>
           </div>
 
           <footer className="footer">

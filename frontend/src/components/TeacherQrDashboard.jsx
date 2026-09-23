@@ -64,41 +64,6 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
     return () => window.clearInterval(timer);
   }, []);
 
-  // Fetch course catalogue and enrolled students from MySQL
-  useEffect(() => {
-    const loadCoursesAndStudents = async () => {
-      try {
-        const [list, studentsList] = await Promise.all([
-          getCourses().catch(() => []),
-          getStudents().catch(() => [])
-        ]);
-        setAvailableCourses(list || []);
-        if ((!courseId || courseId.trim() === '') && list && list.length > 0) {
-          setCourseId(list[0].courseId);
-        }
-        if (studentsList && studentsList.length > 0) {
-          setEnrolledStudents(studentsList);
-        } else {
-          setEnrolledStudents([{ studentId: '12345678', studentName: 'Akash Patil' }]);
-        }
-      } catch (err) {
-        console.warn('Could not fetch course or student directory:', err);
-      }
-    };
-    loadCoursesAndStudents();
-  }, [courseId]);
-
-  // Live polling for attendees every 2.5 seconds while session is active
-  useEffect(() => {
-    if (!isSessionActive || !courseId) return;
-
-    const pollInterval = window.setInterval(() => {
-      loadAttendees(activeCourseRef.current);
-    }, 2500);
-
-    return () => window.clearInterval(pollInterval);
-  }, [isSessionActive, courseId, loadAttendees]);
-
   // Fetch attendees marked present for this session or course
   const loadAttendees = useCallback(async (targetCourseId) => {
     const idToQuery = targetCourseId || activeCourseRef.current;
@@ -134,6 +99,47 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
     }
   }, []);
 
+  // Fetch course catalogue and enrolled students from MySQL
+  useEffect(() => {
+    const loadCoursesAndStudents = async () => {
+      try {
+        const [list, studentsList] = await Promise.all([
+          getCourses().catch(() => []),
+          getStudents().catch(() => [])
+        ]);
+        setAvailableCourses(list || []);
+        if ((!courseId || courseId.trim() === '') && list && list.length > 0) {
+          setCourseId(list[0].courseId);
+        }
+        if (studentsList && studentsList.length > 0) {
+          setEnrolledStudents(studentsList);
+        } else {
+          setEnrolledStudents([{ studentId: '12345678', studentName: 'Akash Patil' }]);
+        }
+      } catch (err) {
+        console.warn('Could not fetch course or student directory:', err);
+      }
+    };
+    loadCoursesAndStudents();
+  }, [courseId]);
+
+  // Live polling for attendees every 2.5 seconds while session is active
+  useEffect(() => {
+    if (!isSessionActive || !courseId) return;
+
+    const pollInterval = window.setInterval(() => {
+      loadAttendees(activeCourseRef.current);
+    }, 2500);
+
+    return () => window.clearInterval(pollInterval);
+  }, [isSessionActive, courseId, loadAttendees]);
+
+  // Callback refs to bridge circular references safely
+  const activateTokenRef = useRef(null);
+  const prefetchNextTokenRef = useRef(null);
+  const handleRotationTransitionRef = useRef(null);
+  const fetchAndActivateImmediatelyRef = useRef(null);
+
   // Pre-fetch the next dynamic QR token ~800ms before current token expires
   const prefetchNextToken = useCallback(async () => {
     if (!isSessionActiveRef.current || !activeCourseRef.current) return;
@@ -156,7 +162,9 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
       if (isWaitingForNextTokenRef.current) {
         isWaitingForNextTokenRef.current = false;
         stagedTokenRef.current = null;
-        activateToken({ token: data.token }, remainingServerLifetime);
+        if (activateTokenRef.current) {
+          activateTokenRef.current({ token: data.token }, remainingServerLifetime);
+        }
       } else {
         stagedTokenRef.current = {
           token: data.token,
@@ -168,7 +176,7 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
     } finally {
       isFetchingRef.current = false;
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Activate a token on screen and schedule the next prefetch and rotation
   const activateToken = useCallback((tokenData, durationMs) => {
@@ -186,14 +194,18 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
     // Schedule prefetch of the next token ahead of expiration (~800ms before)
     const prefetchDelay = Math.max(200, effectiveDuration - 800);
     prefetchTimerRef.current = setTimeout(() => {
-      prefetchNextToken();
+      if (prefetchNextTokenRef.current) {
+        prefetchNextTokenRef.current();
+      }
     }, prefetchDelay);
 
     // Schedule instant switch to staged token at exact expiration
     rotateTimerRef.current = setTimeout(() => {
-      handleRotationTransition();
+      if (handleRotationTransitionRef.current) {
+        handleRotationTransitionRef.current();
+      }
     }, effectiveDuration);
-  }, [clearAllTimers, loadAttendees, prefetchNextToken]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [clearAllTimers, loadAttendees]);
 
   // Perform smooth rotation transition
   const handleRotationTransition = useCallback(() => {
@@ -203,17 +215,21 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
       // 0ms seamless switch to pre-fetched valid token
       const next = stagedTokenRef.current;
       stagedTokenRef.current = null;
-      activateToken(next, next.durationMs);
+      if (activateTokenRef.current) {
+        activateTokenRef.current(next, next.durationMs);
+      }
     } else {
       // If staged token is not ready yet, clear old token so student cannot scan expired code
       setQrToken('');
       if (isFetchingRef.current) {
         isWaitingForNextTokenRef.current = true;
       } else {
-        fetchAndActivateImmediately();
+        if (fetchAndActivateImmediatelyRef.current) {
+          fetchAndActivateImmediatelyRef.current();
+        }
       }
     }
-  }, [activateToken]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Fetch immediately and activate on screen (for init, manual regenerate, or recovery)
   const fetchAndActivateImmediately = useCallback(async () => {
@@ -237,26 +253,38 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
       const elapsed = Date.now() - fetchStart;
       const duration = Math.max(3500, 5000 - elapsed);
       stagedTokenRef.current = null;
-      activateToken({ token: data.token }, duration);
+      if (activateTokenRef.current) {
+        activateTokenRef.current({ token: data.token }, duration);
+      }
     } catch (err) {
       setError(err.message || 'Could not generate dynamic QR code.');
       if (isSessionActiveRef.current) {
         retryTimerRef.current = setTimeout(() => {
-          fetchAndActivateImmediately();
+          if (fetchAndActivateImmediatelyRef.current) {
+            fetchAndActivateImmediatelyRef.current();
+          }
         }, 1200);
       }
     } finally {
       isFetchingRef.current = false;
       setLoading(false);
     }
-  }, [activateToken, clearAllTimers]);
+  }, [clearAllTimers]);
+
+  // Keep refs synchronized with latest callback instances
+  activateTokenRef.current = activateToken;
+  prefetchNextTokenRef.current = prefetchNextToken;
+  handleRotationTransitionRef.current = handleRotationTransition;
+  fetchAndActivateImmediatelyRef.current = fetchAndActivateImmediately;
 
   // Manual regenerate button handler
   const fetchNextQr = useCallback(() => {
     stagedTokenRef.current = null;
     clearAllTimers();
-    fetchAndActivateImmediately();
-  }, [clearAllTimers, fetchAndActivateImmediately]);
+    if (fetchAndActivateImmediatelyRef.current) {
+      fetchAndActivateImmediatelyRef.current();
+    }
+  }, [clearAllTimers]);
 
   // Automatic rotation management whenever course or active session status changes
   useEffect(() => {
@@ -268,12 +296,14 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
       return;
     }
 
-    fetchAndActivateImmediately();
+    if (fetchAndActivateImmediatelyRef.current) {
+      fetchAndActivateImmediatelyRef.current();
+    }
 
     return () => {
       clearAllTimers();
     };
-  }, [courseId, sessionCode, isSessionActive, fetchAndActivateImmediately, clearAllTimers]);
+  }, [courseId, sessionCode, isSessionActive, clearAllTimers]);
 
   // Calculate seconds remaining without floor division
   const secondsLeft = useMemo(() => {
@@ -327,7 +357,7 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
 
   // Active course title
   const activeCourseObj = availableCourses.find(
-    (c) => c.courseId?.toUpperCase() === courseId?.toUpperCase()
+    (c) => String(c?.courseId || '').toUpperCase() === String(courseId || '').toUpperCase()
   );
   const activeCourseTitle = activeCourseObj?.courseName || 'Java';
 
@@ -335,8 +365,9 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
   const presentStudentIds = useMemo(() => {
     const set = new Set();
     attendees.forEach((record) => {
-      if (record.student?.studentId) {
-        set.add(record.student.studentId.trim().toUpperCase());
+      const sid = record?.student?.studentId || record?.studentId;
+      if (sid) {
+        set.add(String(sid).trim().toUpperCase());
       }
     });
     return set;
@@ -344,14 +375,21 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
 
   // Enrolled roster list (guarantee student 12345678 is present for demo test if empty)
   const rosterList = useMemo(() => {
-    if (enrolledStudents.length > 0) {
-      return enrolledStudents;
+    if (Array.isArray(enrolledStudents) && enrolledStudents.length > 0) {
+      return enrolledStudents
+        .map((s) => ({
+          studentId: String(s?.studentId || '').trim(),
+          studentName: s?.studentName || s?.fullName || (s?.studentId ? `Student ${s.studentId}` : 'Student')
+        }))
+        .filter((s) => Boolean(s.studentId));
     }
     return [{ studentId: '12345678', studentName: 'Akash Patil' }];
   }, [enrolledStudents]);
 
   const totalStudentsCount = rosterList.length;
-  const presentStudentsCount = rosterList.filter(s => presentStudentIds.has(s.studentId.toUpperCase())).length;
+  const presentStudentsCount = rosterList.filter(
+    (s) => s.studentId && presentStudentIds.has(s.studentId.toUpperCase())
+  ).length;
 
   return (
     <div className="teacher-qr-page-wrapper">
@@ -595,15 +633,17 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
 
           <div className="attendees-stream-scroll">
             <ul className="attendee-stream-list">
-              {rosterList.map((student) => {
-                const isPresent = presentStudentIds.has(student.studentId.toUpperCase());
-                const matchingRecord = attendees.find(
-                  (a) => a.student?.studentId?.toUpperCase() === student.studentId.toUpperCase()
-                );
+              {rosterList.map((student, idx) => {
+                const sId = String(student?.studentId || '').toUpperCase();
+                const isPresent = Boolean(sId && presentStudentIds.has(sId));
+                const matchingRecord = attendees.find((a) => {
+                  const recordSid = String(a?.student?.studentId || a?.studentId || '').toUpperCase();
+                  return recordSid && recordSid === sId;
+                });
 
                 return (
                   <li
-                    key={student.studentId}
+                    key={student?.studentId || `student-${idx}`}
                     className="attendee-stream-item"
                     style={{
                       borderLeft: isPresent ? '4px solid #16a34a' : '4px solid #cbd5e1',
@@ -618,14 +658,14 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
                         color: isPresent ? '#15803d' : '#64748b'
                       }}
                     >
-                      {student.studentName ? student.studentName.charAt(0).toUpperCase() : 'S'}
+                      {student?.studentName ? student.studentName.charAt(0).toUpperCase() : 'S'}
                     </div>
                     <div className="attendee-details">
                       <span className="attendee-name" style={{ fontWeight: 700 }}>
-                        {student.studentName || `Student ${student.studentId}`}
+                        {student?.studentName || `Student ${student?.studentId || 'N/A'}`}
                       </span>
                       <div className="attendee-meta-row" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                        <span className="record-id-chip">Student #{student.studentId}</span>
+                        <span className="record-id-chip">Student #{student?.studentId || 'N/A'}</span>
                         {isPresent && matchingRecord?.attendanceTime && (
                           <span className="attendee-time" style={{ color: '#15803d', fontWeight: 600, fontSize: '0.8rem' }}>
                             ⏱ {formatTime(matchingRecord.attendanceTime)}
