@@ -19,7 +19,7 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json'
   },
-  timeout: 15000
+  timeout: 75000 // 75 seconds to safely accommodate Render Free cold starts (30-50s)
 });
 
 // Authentication APIs (Spring Security Session)

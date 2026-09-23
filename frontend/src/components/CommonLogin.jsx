@@ -1,15 +1,30 @@
-import React, { useState } from 'react';
-import { login } from '../services/api.js';
+import React, { useState, useEffect, useRef } from 'react';
+import { login, getHealthStatus } from '../services/api.js';
 
 const CommonLogin = ({ onLoginSuccess, onBackToLanding }) => {
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [isWakingUp, setIsWakingUp] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const slowTimerRef = useRef(null);
+
+  // Pre-wake Render Free Tier backend via lightweight GET /api/health
+  // Strictly non-blocking and independent; never delays or interferes with login
+  useEffect(() => {
+    getHealthStatus().catch(() => {});
+    return () => {
+      if (slowTimerRef.current) {
+        clearTimeout(slowTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return; // Prevent duplicate submissions
+
     setErrorMsg('');
 
     if (!username.trim() || !password) {
@@ -18,16 +33,45 @@ const CommonLogin = ({ onLoginSuccess, onBackToLanding }) => {
     }
 
     setLoading(true);
+    setIsWakingUp(false);
+
+    // If backend takes longer than 6 seconds (Render Free Tier cold start), inform user
+    slowTimerRef.current = setTimeout(() => {
+      setIsWakingUp(true);
+    }, 6000);
+
     try {
       const userData = await login(username.trim(), password);
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
       if (onLoginSuccess) {
         onLoginSuccess(userData);
       }
     } catch (err) {
-      const msg = err.response?.data?.error || 'Authentication failed. Please check your credentials.';
-      setErrorMsg(msg);
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
+
+      if (err.response) {
+        const status = err.response.status;
+        if (status === 401) {
+          // A. HTTP 401 / actual invalid credentials
+          setErrorMsg(err.response.data?.error || 'Invalid username or password.');
+        } else if (status >= 500) {
+          // C. HTTP 5xx backend failure
+          setErrorMsg('Server is temporarily unavailable. Please try again.');
+        } else {
+          // D. Other unexpected HTTP errors
+          setErrorMsg(err.response.data?.error || err.response.data?.message || 'An unexpected error occurred. Please try again.');
+        }
+      } else if (err.code === 'ECONNABORTED' || err.message?.includes('timeout') || err.message?.includes('Network Error')) {
+        // B. Network failure / timeout / backend waking up
+        setErrorMsg('Server is waking up. Please wait a few seconds and try again.');
+      } else {
+        // Fallback for missing HTTP response / network issue without falsely blaming credentials
+        setErrorMsg('Server is waking up. Please wait a few seconds and try again.');
+      }
     } finally {
+      if (slowTimerRef.current) clearTimeout(slowTimerRef.current);
       setLoading(false);
+      setIsWakingUp(false);
     }
   };
 
@@ -155,7 +199,7 @@ const CommonLogin = ({ onLoginSuccess, onBackToLanding }) => {
               {loading ? (
                 <>
                   <span className="btn-spinner"></span>
-                  <span>Verifying Credentials...</span>
+                  <span>{isWakingUp ? 'Waking up server, please wait...' : 'Signing in...'}</span>
                 </>
               ) : (
                 <>
@@ -164,6 +208,20 @@ const CommonLogin = ({ onLoginSuccess, onBackToLanding }) => {
                 </>
               )}
             </button>
+            {loading && isWakingUp && (
+              <p
+                style={{
+                  marginTop: '12px',
+                  marginBottom: 0,
+                  fontSize: '0.82rem',
+                  color: 'var(--color-primary)',
+                  textAlign: 'center',
+                  lineHeight: 1.4
+                }}
+              >
+                The cloud server is waking up from idle. Please wait a moment while it finishes starting...
+              </p>
+            )}
           </form>
 
           <div style={{ marginTop: '28px', paddingTop: '20px', borderTop: '1px solid var(--color-border)', textAlign: 'center' }}>
