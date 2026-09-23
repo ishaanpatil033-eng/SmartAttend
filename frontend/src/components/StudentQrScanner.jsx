@@ -25,6 +25,8 @@ const StudentQrScanner = ({
 
   const html5QrCodeRef = useRef(null);
   const scannerContainerId = 'qr-camera-viewport';
+  const latestLocationRef = useRef(null);
+  const locationWatchIdRef = useRef(null);
 
   // Synchronize course ID prop
   useEffect(() => {
@@ -44,6 +46,123 @@ const StudentQrScanner = ({
       setStudentId(initialStudentId);
     }
   }, [initialStudentId]);
+
+  // Pre-warm and continuously maintain geolocation while scanner workspace is active
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setLocationStatus('denied');
+      return;
+    }
+
+    setLocationStatus('locating');
+
+    const handleSuccess = (position) => {
+      const coords = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        timestamp: position.timestamp || Date.now()
+      };
+      latestLocationRef.current = coords;
+      setLocationCoords(coords);
+      setLocationStatus('ready');
+    };
+
+    const handleError = (error) => {
+      if (!latestLocationRef.current) {
+        setLocationStatus(error.code === 1 ? 'denied' : 'idle');
+      }
+    };
+
+    // 1. Initial quick location query allowing recent cached coordinates (up to 30 seconds)
+    navigator.geolocation.getCurrentPosition(handleSuccess, handleError, {
+      enableHighAccuracy: true,
+      timeout: 8000,
+      maximumAge: 30000
+    });
+
+    // 2. Active position watcher while scanner component is open
+    let watchId = null;
+    try {
+      watchId = navigator.geolocation.watchPosition(handleSuccess, handleError, {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 15000
+      });
+      locationWatchIdRef.current = watchId;
+    } catch (_) {}
+
+    return () => {
+      if (locationWatchIdRef.current !== null) {
+        navigator.geolocation.clearWatch(locationWatchIdRef.current);
+        locationWatchIdRef.current = null;
+      }
+    };
+  }, []);
+
+  // Retrieve effective location: 0ms instantaneous if pre-warmed, or short fallback wait
+  const getEffectiveLocation = useCallback(() => {
+    // 1. If valid, sufficiently recent location (< 45s) is already in memory, return immediately
+    if (latestLocationRef.current) {
+      const ageMs = Date.now() - (latestLocationRef.current.timestamp || 0);
+      if (ageMs < 45000) {
+        return Promise.resolve(latestLocationRef.current);
+      }
+    }
+
+    if (!navigator.geolocation) {
+      return Promise.reject(new Error('Geolocation is not supported by your browser.'));
+    }
+
+    // 2. If no location yet (e.g. instant scan within first second), briefly wait without blocking indefinitely
+    setLocationStatus('locating');
+    setErrorMsg('Getting your location. Please keep the scanner open...');
+
+    return new Promise((resolve, reject) => {
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          if (latestLocationRef.current) {
+            resolve(latestLocationRef.current);
+          } else {
+            reject(new Error('Attendance rejected: Location unavailable or GPS timed out. Please ensure GPS is enabled and retry.'));
+          }
+        }
+      }, 3500);
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timer);
+            const coords = {
+              latitude: pos.coords.latitude,
+              longitude: pos.coords.longitude,
+              accuracy: pos.coords.accuracy,
+              timestamp: pos.timestamp || Date.now()
+            };
+            latestLocationRef.current = coords;
+            setLocationCoords(coords);
+            setLocationStatus('ready');
+            resolve(coords);
+          }
+        },
+        (err) => {
+          if (!resolved) {
+            resolved = true;
+            clearTimeout(timer);
+            if (latestLocationRef.current) {
+              resolve(latestLocationRef.current);
+            } else {
+              reject(err);
+            }
+          }
+        },
+        { enableHighAccuracy: true, timeout: 3500, maximumAge: 30000 }
+      );
+    });
+  }, []);
 
   // Load registered courses from MySQL
   useEffect(() => {
@@ -98,24 +217,7 @@ const StudentQrScanner = ({
     return `FP-${Math.abs(hash).toString(16)}-${localUuid.substring(4, 10)}`;
   };
 
-  // Browser Geolocation Promisified
-  const requestLocation = () => {
-    return new Promise((resolve, reject) => {
-      if (!navigator.geolocation) {
-        reject(new Error('Geolocation is not supported by your browser.'));
-        return;
-      }
-      navigator.geolocation.getCurrentPosition(
-        (position) => {
-          resolve(position);
-        },
-        (error) => {
-          reject(error);
-        },
-        { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-      );
-    });
-  };
+  const hasScannedRef = useRef(false);
 
   // Stop camera stream safely
   const stopCamera = useCallback(async () => {
@@ -160,24 +262,18 @@ const StudentQrScanner = ({
 
       setSubmitting(true);
 
-      // 1. Acquire real GPS coordinates
-      let pos;
+      // 1. Acquire real GPS coordinates (instantaneous via pre-warmed memory cache)
+      let coords;
       try {
-        setLocationStatus('locating');
-        pos = await requestLocation();
-        setLocationCoords({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy: pos.coords.accuracy
-        });
-        setLocationStatus('ready');
+        coords = await getEffectiveLocation();
       } catch (geoErr) {
         setLocationStatus('denied');
         setSubmitting(false);
-        if (geoErr.code === 1) {
+        hasScannedRef.current = false;
+        if (geoErr?.code === 1) {
           setErrorMsg('Attendance cannot be marked without location verification. Location permission was denied.');
         } else {
-          setErrorMsg('Attendance rejected: Location unavailable or GPS timed out. Please enable device location.');
+          setErrorMsg(geoErr?.message || 'Attendance rejected: Location unavailable or GPS timed out. Please enable device location.');
         }
         return;
       }
@@ -192,9 +288,9 @@ const StudentQrScanner = ({
           courseId: activeCourse,
           sessionCode: sessionCode || undefined,
           studentId: studentId || undefined,
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
+          latitude: coords.latitude,
+          longitude: coords.longitude,
+          accuracy: coords.accuracy,
           deviceFingerprint: deviceFingerprint
         });
 
@@ -213,9 +309,11 @@ const StudentQrScanner = ({
           setQrToken('');
           await stopCamera();
         } else {
+          hasScannedRef.current = false;
           setErrorMsg(result?.error || 'Failed to mark attendance. Please verify with instructor.');
         }
       } catch (err) {
+        hasScannedRef.current = false;
         const rawErr = err.response?.data?.error || err.message || 'Could not connect to attendance server.';
         
         // Human-friendly security classification
@@ -240,7 +338,7 @@ const StudentQrScanner = ({
         setSubmitting(false);
       }
     },
-    [qrToken, studentId, courseId, currentStudentName, currentCourseName, stopCamera]
+    [qrToken, studentId, courseId, sessionCode, currentStudentName, currentCourseName, stopCamera, getEffectiveLocation]
   );
 
   // Start Camera QR Scanner
@@ -248,6 +346,7 @@ const StudentQrScanner = ({
     setErrorMsg('');
     setCameraError('');
     setSuccessData(null);
+    hasScannedRef.current = false;
 
     try {
       await stopCamera();
@@ -270,9 +369,11 @@ const StudentQrScanner = ({
           fps: 10,
           qrbox: { width: 240, height: 240 }
         },
-        async (decodedText) => {
+        (decodedText) => {
+          if (hasScannedRef.current) return;
+          hasScannedRef.current = true;
           setQrToken(decodedText);
-          await stopCamera();
+          stopCamera().catch(() => {});
           submitAttendance(decodedText);
         },
         () => {
@@ -299,6 +400,7 @@ const StudentQrScanner = ({
   // Handle manual form submission
   const handleManualFormSubmit = (e) => {
     e.preventDefault();
+    hasScannedRef.current = false;
     submitAttendance();
   };
 
@@ -308,6 +410,7 @@ const StudentQrScanner = ({
     setQrToken('');
     setErrorMsg('');
     setCameraError('');
+    hasScannedRef.current = false;
   };
 
   return (

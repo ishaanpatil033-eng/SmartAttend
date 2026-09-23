@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
 import { generateQrToken, getCourseAttendance, getCourses, getClassAttendance } from '../services/api.js';
 
@@ -10,12 +10,24 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
   const [availableCourses, setAvailableCourses] = useState([]);
   const [qrToken, setQrToken] = useState('');
   const [expiresAtMs, setExpiresAtMs] = useState(null);
+  const [tokenDurationMs, setTokenDurationMs] = useState(REFRESH_SECONDS * 1000);
   const [attendees, setAttendees] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [isSessionActive, setIsSessionActive] = useState(true);
   const [copiedNotice, setCopiedNotice] = useState(false);
   const [now, setNow] = useState(Date.now());
+
+  const isFetchingRef = useRef(false);
+  const isWaitingForNextTokenRef = useRef(false);
+  const stagedTokenRef = useRef(null);
+  const prefetchTimerRef = useRef(null);
+  const rotateTimerRef = useRef(null);
+  const retryTimerRef = useRef(null);
+
+  const activeCourseRef = useRef(courseId);
+  const activeSessionRef = useRef(sessionCode);
+  const isSessionActiveRef = useRef(isSessionActive);
 
   // Synchronize if initialCourseId changes
   useEffect(() => {
@@ -29,6 +41,18 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
       setSessionCode(initialSessionCode);
     }
   }, [initialSessionCode]);
+
+  useEffect(() => {
+    activeCourseRef.current = courseId;
+  }, [courseId]);
+
+  useEffect(() => {
+    activeSessionRef.current = sessionCode;
+  }, [sessionCode]);
+
+  useEffect(() => {
+    isSessionActiveRef.current = isSessionActive;
+  }, [isSessionActive]);
 
   // Clock tick to update the countdown timer smoothly every 200ms
   useEffect(() => {
@@ -57,54 +81,179 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
 
   // Fetch attendees marked present for this session or course
   const loadAttendees = useCallback(async (targetCourseId) => {
-    const idToQuery = targetCourseId || courseId;
+    const idToQuery = targetCourseId || activeCourseRef.current;
     if (!idToQuery) return;
     try {
       let records = [];
-      if (sessionCode) {
-        records = await getClassAttendance(sessionCode).catch(() => []);
+      const currentSession = activeSessionRef.current;
+      if (currentSession) {
+        records = await getClassAttendance(currentSession).catch(() => []);
       }
       if (!records || records.length === 0) {
         records = await getCourseAttendance(idToQuery).catch(() => []);
       }
       setAttendees(records || []);
     } catch (err) {
-      // Backend returns 404 or empty list if no attendance yet
       setAttendees([]);
     }
-  }, [courseId, sessionCode]);
+  }, []);
 
-  // Request a new dynamic QR token that expires in 5 seconds
-  const fetchNextQr = useCallback(async () => {
-    if (!courseId || !isSessionActive) {
-      return;
+  // Clear all pending scheduled timeouts
+  const clearAllTimers = useCallback(() => {
+    if (prefetchTimerRef.current) {
+      clearTimeout(prefetchTimerRef.current);
+      prefetchTimerRef.current = null;
     }
+    if (rotateTimerRef.current) {
+      clearTimeout(rotateTimerRef.current);
+      rotateTimerRef.current = null;
+    }
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current);
+      retryTimerRef.current = null;
+    }
+  }, []);
+
+  // Pre-fetch the next dynamic QR token ~800ms before current token expires
+  const prefetchNextToken = useCallback(async () => {
+    if (!isSessionActiveRef.current || !activeCourseRef.current) return;
+    if (isFetchingRef.current) return;
 
     try {
+      isFetchingRef.current = true;
+      const fetchStart = Date.now();
+      const currentCourse = activeCourseRef.current;
+      const currentSession = activeSessionRef.current;
+
+      const data = await generateQrToken(currentCourse, currentSession || null);
+      if (!isSessionActiveRef.current || activeCourseRef.current !== currentCourse) {
+        return;
+      }
+
+      const elapsed = Date.now() - fetchStart;
+      const remainingServerLifetime = Math.max(3500, 5000 - elapsed);
+
+      if (isWaitingForNextTokenRef.current) {
+        isWaitingForNextTokenRef.current = false;
+        stagedTokenRef.current = null;
+        activateToken({ token: data.token }, remainingServerLifetime);
+      } else {
+        stagedTokenRef.current = {
+          token: data.token,
+          durationMs: remainingServerLifetime
+        };
+      }
+    } catch (err) {
+      console.warn('Pre-fetch dynamic QR token warning:', err);
+    } finally {
+      isFetchingRef.current = false;
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Activate a token on screen and schedule the next prefetch and rotation
+  const activateToken = useCallback((tokenData, durationMs) => {
+    if (!isSessionActiveRef.current) return;
+
+    clearAllTimers();
+    isWaitingForNextTokenRef.current = false;
+    setQrToken(tokenData.token);
+    const effectiveDuration = Math.max(3000, durationMs || (REFRESH_SECONDS * 1000));
+    setTokenDurationMs(effectiveDuration);
+    setExpiresAtMs(Date.now() + effectiveDuration);
+
+    loadAttendees(activeCourseRef.current);
+
+    // Schedule prefetch of the next token ahead of expiration (~800ms before)
+    const prefetchDelay = Math.max(200, effectiveDuration - 800);
+    prefetchTimerRef.current = setTimeout(() => {
+      prefetchNextToken();
+    }, prefetchDelay);
+
+    // Schedule instant switch to staged token at exact expiration
+    rotateTimerRef.current = setTimeout(() => {
+      handleRotationTransition();
+    }, effectiveDuration);
+  }, [clearAllTimers, loadAttendees, prefetchNextToken]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Perform smooth rotation transition
+  const handleRotationTransition = useCallback(() => {
+    if (!isSessionActiveRef.current) return;
+
+    if (stagedTokenRef.current) {
+      // 0ms seamless switch to pre-fetched valid token
+      const next = stagedTokenRef.current;
+      stagedTokenRef.current = null;
+      activateToken(next, next.durationMs);
+    } else {
+      // If staged token is not ready yet, clear old token so student cannot scan expired code
+      setQrToken('');
+      if (isFetchingRef.current) {
+        isWaitingForNextTokenRef.current = true;
+      } else {
+        fetchAndActivateImmediately();
+      }
+    }
+  }, [activateToken]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fetch immediately and activate on screen (for init, manual regenerate, or recovery)
+  const fetchAndActivateImmediately = useCallback(async () => {
+    if (!isSessionActiveRef.current || !activeCourseRef.current) return;
+    if (isFetchingRef.current) return;
+
+    clearAllTimers();
+    try {
+      isFetchingRef.current = true;
       setLoading(true);
       setError('');
-      const data = await generateQrToken(courseId, sessionCode || null);
-      setQrToken(data.token);
-      setExpiresAtMs(Date.now() + REFRESH_SECONDS * 1000);
-      loadAttendees(courseId);
+      const fetchStart = Date.now();
+      const currentCourse = activeCourseRef.current;
+      const currentSession = activeSessionRef.current;
+
+      const data = await generateQrToken(currentCourse, currentSession || null);
+      if (!isSessionActiveRef.current || activeCourseRef.current !== currentCourse) {
+        return;
+      }
+
+      const elapsed = Date.now() - fetchStart;
+      const duration = Math.max(3500, 5000 - elapsed);
+      stagedTokenRef.current = null;
+      activateToken({ token: data.token }, duration);
     } catch (err) {
       setError(err.message || 'Could not generate dynamic QR code.');
+      if (isSessionActiveRef.current) {
+        retryTimerRef.current = setTimeout(() => {
+          fetchAndActivateImmediately();
+        }, 1200);
+      }
     } finally {
+      isFetchingRef.current = false;
       setLoading(false);
     }
-  }, [courseId, sessionCode, isSessionActive, loadAttendees]);
+  }, [activateToken, clearAllTimers]);
 
-  // 5-second automatic refresh interval
+  // Manual regenerate button handler
+  const fetchNextQr = useCallback(() => {
+    stagedTokenRef.current = null;
+    clearAllTimers();
+    fetchAndActivateImmediately();
+  }, [clearAllTimers, fetchAndActivateImmediately]);
+
+  // Automatic rotation management whenever course or active session status changes
   useEffect(() => {
-    if (!isSessionActive) {
+    if (!isSessionActive || !courseId) {
+      clearAllTimers();
+      setQrToken('');
+      setExpiresAtMs(null);
+      stagedTokenRef.current = null;
       return;
     }
 
-    fetchNextQr();
-    const refreshInterval = window.setInterval(fetchNextQr, REFRESH_SECONDS * 1000);
+    fetchAndActivateImmediately();
 
-    return () => window.clearInterval(refreshInterval);
-  }, [fetchNextQr, isSessionActive]);
+    return () => {
+      clearAllTimers();
+    };
+  }, [courseId, sessionCode, isSessionActive, fetchAndActivateImmediately, clearAllTimers]);
 
   // Calculate seconds remaining without floor division
   const secondsLeft = useMemo(() => {
@@ -118,14 +267,14 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
     return Math.ceil(diff / 1000);
   }, [expiresAtMs, now, isSessionActive]);
 
-  // Progress percentage (100% down to 0% over 5 seconds)
+  // Progress percentage (100% down to 0% over token duration)
   const progressPercent = useMemo(() => {
     if (!expiresAtMs || !isSessionActive) return 0;
     const diff = expiresAtMs - now;
     if (diff <= 0) return 0;
-    const totalMs = REFRESH_SECONDS * 1000;
+    const totalMs = tokenDurationMs || (REFRESH_SECONDS * 1000);
     return Math.min(100, Math.max(0, (diff / totalMs) * 100));
-  }, [expiresAtMs, now, isSessionActive]);
+  }, [expiresAtMs, now, isSessionActive, tokenDurationMs]);
 
   // Copy active token to clipboard
   const handleCopyToken = () => {
@@ -141,6 +290,8 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
   const handleToggleSession = () => {
     if (isSessionActive) {
       setIsSessionActive(false);
+      clearAllTimers();
+      stagedTokenRef.current = null;
       setQrToken('');
       setExpiresAtMs(null);
     } else {
