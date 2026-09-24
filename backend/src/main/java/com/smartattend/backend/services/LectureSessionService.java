@@ -241,6 +241,49 @@ public class LectureSessionService {
     }
 
     @Transactional
+    public LectureSession setClassroomLocation(String sessionCode, Double latitude, Double longitude, Double accuracy,
+                                               String requestingUsername, String requestingRole) {
+        if (sessionCode == null || sessionCode.trim().isEmpty()) {
+            throw new IllegalArgumentException("Session code is required.");
+        }
+        if (latitude == null || longitude == null) {
+            throw new IllegalArgumentException("Latitude and longitude are required to set classroom location.");
+        }
+        if (latitude < -90.0 || latitude > 90.0 || longitude < -180.0 || longitude > 180.0) {
+            throw new IllegalArgumentException("Invalid GPS coordinates provided.");
+        }
+        if (accuracy == null || accuracy <= 0 || accuracy > 50.0) {
+            throw new IllegalArgumentException("Classroom location rejected: GPS accuracy is insufficient ("
+                    + Math.round(accuracy != null ? accuracy : 0) + "m). Maximum allowed is 50m.");
+        }
+
+        LectureSession session = lectureSessionRepository.findBySessionCode(sessionCode.trim())
+                .orElseThrow(() -> new IllegalArgumentException("Lecture session not found for code: " + sessionCode));
+
+        boolean isAdmin = "ROLE_ADMIN".equalsIgnoreCase(requestingRole) || "ADMIN".equalsIgnoreCase(requestingRole);
+        boolean isFaculty = "ROLE_FACULTY".equalsIgnoreCase(requestingRole) || "ROLE_TEACHER".equalsIgnoreCase(requestingRole)
+                || "FACULTY".equalsIgnoreCase(requestingRole) || "TEACHER".equalsIgnoreCase(requestingRole);
+
+        if (!isAdmin && !isFaculty) {
+            throw new AccessDeniedException("Access denied: Only Faculty and Admin can set classroom location.");
+        }
+
+        if (isFaculty && !isAdmin) {
+            if (session.getFacultyId() != null && !session.getFacultyId().equalsIgnoreCase(requestingUsername)) {
+                throw new AccessDeniedException("Access denied: You cannot set the classroom location for another faculty's lecture session.");
+            }
+        }
+
+        session.setClassroomLatitude(latitude);
+        session.setClassroomLongitude(longitude);
+        session.setClassroomAccuracy(accuracy);
+
+        LectureSession saved = lectureSessionRepository.save(session);
+        enrichSessionMetrics(saved);
+        return saved;
+    }
+
+    @Transactional
     public void deleteSession(Long id, String requestingUsername, String requestingRole) {
         LectureSession session = lectureSessionRepository.findById(id)
                 .orElseThrow(() -> new IllegalArgumentException("Lecture session not found with ID: " + id));

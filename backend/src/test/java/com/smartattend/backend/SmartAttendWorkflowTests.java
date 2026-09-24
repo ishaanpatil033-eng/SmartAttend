@@ -550,15 +550,23 @@ public class SmartAttendWorkflowTests {
         Long sessionId = createdSession.getId();
         assertNotNull(sessionCode);
 
-        // 3. Faculty launches 5-second dynamic QR
+        // 3. Faculty launches 5-second dynamic QR with captured classroom coordinates
         MvcResult qrResult = mockMvc.perform(post("/api/attendance/qr/generate")
                 .session(facultySession)
                 .param("courseId", "FSJP")
-                .param("sessionCode", sessionCode))
+                .param("sessionCode", sessionCode)
+                .param("latitude", "19.0760")
+                .param("longitude", "72.8777")
+                .param("accuracy", "10.0"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").isNotEmpty())
                 .andExpect(jsonPath("$.expiresInSeconds").value(5))
                 .andReturn();
+
+        LectureSession storedSession = lectureSessionRepository.findBySessionCode(sessionCode).orElseThrow();
+        assertEquals(19.0760, storedSession.getClassroomLatitude(), 0.0001);
+        assertEquals(72.8777, storedSession.getClassroomLongitude(), 0.0001);
+        assertEquals(10.0, storedSession.getClassroomAccuracy(), 0.1);
 
         String qrToken = objectMapper.readTree(qrResult.getResponse().getContentAsString()).get("token").asText();
 

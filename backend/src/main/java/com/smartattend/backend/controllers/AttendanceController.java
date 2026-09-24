@@ -48,11 +48,16 @@ public class AttendanceController {
 
     /**
      * Generate a new dynamic QR token that expires in 5 seconds.
-     * POST /api/attendance/qr/generate?courseId=CS101
+     * Optionally accepts faculty GPS coordinates (latitude, longitude, accuracy) to establish
+     * the dynamic classroom location anchor for the session.
+     * POST /api/attendance/qr/generate?courseId=CS101&sessionCode=...&latitude=...&longitude=...&accuracy=...
      */
     @PostMapping("/qr/generate")
     public ResponseEntity<?> generateQrToken(@RequestParam(required = false) String courseId,
                                              @RequestParam(required = false) String sessionCode,
+                                             @RequestParam(required = false) Double latitude,
+                                             @RequestParam(required = false) Double longitude,
+                                             @RequestParam(required = false) Double accuracy,
                                              Authentication authentication) {
         String resolvedCourseId = courseId;
         if (authentication != null && authentication.isAuthenticated()) {
@@ -71,7 +76,21 @@ public class AttendanceController {
                     if (resolvedCourseId == null || resolvedCourseId.trim().isEmpty()) {
                         resolvedCourseId = s.getCourseId();
                     }
+
+                    // If coordinates are provided, establish classroom location on session
+                    if (latitude != null || longitude != null || accuracy != null) {
+                        String role = isAdminOrHod ? "ROLE_ADMIN" : "ROLE_FACULTY";
+                        try {
+                            lectureSessionService.setClassroomLocation(sessionCode.trim(), latitude, longitude, accuracy, authentication.getName(), role);
+                        } catch (AccessDeniedException e) {
+                            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", e.getMessage()));
+                        } catch (IllegalArgumentException e) {
+                            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+                        }
+                    }
                 }
+            } else if (latitude != null || longitude != null || accuracy != null) {
+                return ResponseEntity.badRequest().body(Map.of("error", "Session code is required to establish classroom location."));
             }
         }
         if (resolvedCourseId == null || resolvedCourseId.trim().isEmpty()) {

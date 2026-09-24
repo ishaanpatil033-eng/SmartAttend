@@ -247,7 +247,27 @@ public class AttendanceService {
             throw new IllegalArgumentException("Attendance rejected: GPS accuracy is insufficient (" + Math.round(scanRequest.getAccuracy() != null ? scanRequest.getAccuracy() : 0) + "m). Maximum allowed is " + Math.round(maxAccuracyMeters) + "m.");
         }
 
-        double distance = calculateHaversineDistance(scanRequest.getLatitude(), scanRequest.getLongitude(), targetLatitude, targetLongitude);
+        double sessionTargetLatitude;
+        double sessionTargetLongitude;
+
+        Optional<LectureSession> sessionOpt = (sessionCode != null && !sessionCode.trim().isEmpty())
+                ? lectureSessionRepository.findBySessionCode(sessionCode.trim())
+                : Optional.empty();
+
+        if (sessionOpt.isPresent()) {
+            LectureSession session = sessionOpt.get();
+            if (session.getClassroomLatitude() == null || session.getClassroomLongitude() == null) {
+                securityAuditService.logEvent("GEOFENCE_REJECTION", authenticatedUsername, resolvedStudentId, clientIp, userAgent, courseId, sessionCode, "Classroom location not established");
+                throw new IllegalArgumentException("Attendance rejected: Classroom location has not been established for this class session. Please ask your faculty to launch Dynamic QR attendance.");
+            }
+            sessionTargetLatitude = session.getClassroomLatitude();
+            sessionTargetLongitude = session.getClassroomLongitude();
+        } else {
+            sessionTargetLatitude = targetLatitude;
+            sessionTargetLongitude = targetLongitude;
+        }
+
+        double distance = calculateHaversineDistance(scanRequest.getLatitude(), scanRequest.getLongitude(), sessionTargetLatitude, sessionTargetLongitude);
         if (distance > allowedRadiusMeters) {
             securityAuditService.logEvent("GEOFENCE_REJECTION", authenticatedUsername, resolvedStudentId, clientIp, userAgent, courseId, sessionCode, "Outside geofence: distance " + Math.round(distance) + "m");
             throw new IllegalArgumentException("Attendance rejected: you are outside the allowed classroom area (" + Math.round(distance) + "m away, maximum allowed is " + Math.round(allowedRadiusMeters) + "m).");
@@ -273,10 +293,8 @@ public class AttendanceService {
                 .orElseThrow(() -> new IllegalArgumentException("Student not registered in the system: " + resolvedStudentId));
 
         // 9b. Verify Lecture Session Cohort (Division & Batch validation)
-        if (sessionCode != null) {
-            Optional<LectureSession> sessionOpt = lectureSessionRepository.findBySessionCode(sessionCode);
-            if (sessionOpt.isPresent()) {
-                LectureSession session = sessionOpt.get();
+        if (sessionOpt.isPresent()) {
+            LectureSession session = sessionOpt.get();
                 // Division check: division must match
                 if (session.getDivision() != null && student.getDivision() != null) {
                     if (!session.getDivision().trim().equalsIgnoreCase(student.getDivision().trim())) {
@@ -296,7 +314,6 @@ public class AttendanceService {
                     }
                 }
             }
-        }
 
         // 10. Verify Course existence
         Course course = courseRepository.findByCourseId(courseId)

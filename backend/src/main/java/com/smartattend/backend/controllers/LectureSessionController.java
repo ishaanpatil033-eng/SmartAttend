@@ -204,4 +204,44 @@ public class LectureSessionController {
         }
         return ResponseEntity.ok(lectureSessionService.getAttendanceForSession(sessionCode));
     }
+
+    @PostMapping("/{sessionCode}/location")
+    public ResponseEntity<?> setClassroomLocation(@PathVariable String sessionCode,
+                                                  @RequestBody Map<String, Object> locationData,
+                                                  Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED).body(Map.of("error", "Authentication required."));
+        }
+        boolean isFaculty = authentication.getAuthorities().stream().anyMatch(a ->
+                "ROLE_FACULTY".equals(a.getAuthority()) || "ROLE_TEACHER".equals(a.getAuthority()));
+        boolean isAdmin = authentication.getAuthorities().stream().anyMatch(a ->
+                "ROLE_ADMIN".equals(a.getAuthority()));
+
+        if (!isFaculty && !isAdmin) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("error", "Access denied: Only Faculty and Admin can establish classroom location."));
+        }
+
+        try {
+            Double latitude = locationData.get("latitude") != null ? Double.valueOf(locationData.get("latitude").toString()) : null;
+            Double longitude = locationData.get("longitude") != null ? Double.valueOf(locationData.get("longitude").toString()) : null;
+            Double accuracy = locationData.get("accuracy") != null ? Double.valueOf(locationData.get("accuracy").toString()) : null;
+
+            String username = authentication.getName();
+            String role = isAdmin ? "ROLE_ADMIN" : "ROLE_FACULTY";
+
+            LectureSession updated = lectureSessionService.setClassroomLocation(sessionCode, latitude, longitude, accuracy, username, role);
+            return ResponseEntity.ok(Map.of(
+                    "success", true,
+                    "message", "Classroom location captured successfully.",
+                    "session", updated
+            ));
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(Map.of("error", "Failed to set location: " + e.getMessage()));
+        }
+    }
 }

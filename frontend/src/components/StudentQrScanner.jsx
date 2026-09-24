@@ -273,7 +273,7 @@ const StudentQrScanner = ({
         setSubmitting(false);
         hasScannedRef.current = false;
         setScanStage('idle');
-        setErrorMsg('We could not confirm that you are inside the allowed classroom area. Please make sure Location is enabled and that you are physically inside the configured classroom area.');
+        setErrorMsg('Could not acquire your device GPS location. Please make sure location access is enabled for your browser and device, then try again.');
         return;
       }
 
@@ -327,13 +327,14 @@ const StudentQrScanner = ({
           setErrorMsg('This QR code has expired. Please scan the latest QR displayed by your faculty.');
         } else if (rawLower.includes('already been marked') || rawLower.includes('already marked') || err.response?.status === 409) {
           setErrorMsg('Your attendance is already marked for this session.');
-        } else if (
-          rawLower.includes('outside the allowed classroom area') ||
-          rawLower.includes('geofence') ||
-          rawLower.includes('gps accuracy is insufficient') ||
-          rawLower.includes('location permission required')
-        ) {
-          setErrorMsg('We could not confirm that you are inside the allowed classroom area. Please make sure Location is enabled and that you are physically inside the configured classroom area.');
+        } else if (rawLower.includes('classroom location has not been established')) {
+          setErrorMsg(rawErr);
+        } else if (rawLower.includes('outside the allowed classroom area')) {
+          setErrorMsg(rawErr);
+        } else if (rawLower.includes('gps accuracy is insufficient')) {
+          setErrorMsg(rawErr);
+        } else if (rawLower.includes('location permission required') || rawLower.includes('missing gps')) {
+          setErrorMsg('Location permission required for attendance. Please enable device GPS location services in your browser.');
         } else if (
           rawLower.includes('belongs to course') ||
           rawLower.includes('division') ||
