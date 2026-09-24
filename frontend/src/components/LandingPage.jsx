@@ -227,7 +227,7 @@ const LandingPage = ({ onGetStarted, onLogin }) => {
               The student opens the camera scanner from their mobile portal and scans the active classroom QR code.
             </p>
             <div style={{ marginTop: '14px', paddingTop: '10px', borderTop: '1px solid var(--color-border)', fontSize: '0.84rem', color: 'var(--color-primary)', fontWeight: 600 }}>
-              &rarr; Backend validates the session, authenticated student identity, GPS geofence, and device integrity.
+              &rarr; Backend validates the session, authenticated student identity, dynamic 5s QR token, and device integrity.
             </div>
           </div>
 
@@ -310,7 +310,7 @@ const LandingPage = ({ onGetStarted, onLogin }) => {
               </div>
             </div>
             <p className="footer-mission" style={{ maxWidth: '580px', marginTop: '8px' }}>
-              Dynamic 5-second QR attendance management with browser geolocation, academic structure verification, and native Moodle LMS REST integration.
+              Dynamic 5-second QR attendance management with single-scan token rotation, academic structure verification, and native Moodle LMS REST integration.
             </p>
           </div>
 

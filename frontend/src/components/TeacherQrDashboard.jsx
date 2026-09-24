@@ -19,15 +19,6 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
   const [copiedNotice, setCopiedNotice] = useState(false);
   const [now, setNow] = useState(Date.now());
 
-  // Dynamic classroom location capture state
-  const [classroomLocation, setClassroomLocation] = useState(null);
-  const [locationStatus, setLocationStatus] = useState('idle'); // 'idle' | 'capturing' | 'captured' | 'poor_accuracy' | 'denied' | 'error'
-  const [locationErrorMsg, setLocationErrorMsg] = useState('');
-  const [accuracyValue, setAccuracyValue] = useState(null);
-
-  const classroomLocationRef = useRef(null);
-  const requestClassroomLocationRef = useRef(null);
-
   const isFetchingRef = useRef(false);
   const isWaitingForNextTokenRef = useRef(false);
   const stagedTokenRef = useRef(null);
@@ -165,61 +156,6 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
   const handleRotationTransitionRef = useRef(null);
   const fetchAndActivateImmediatelyRef = useRef(null);
 
-  // Capture authoritative classroom location once from Faculty browser
-  const requestClassroomLocation = useCallback(() => {
-    clearAllTimers();
-    setQrToken('');
-    setExpiresAtMs(null);
-    stagedTokenRef.current = null;
-    setLocationStatus('capturing');
-    setLocationErrorMsg('');
-    setError('');
-
-    if (!navigator.geolocation) {
-      setLocationStatus('error');
-      setLocationErrorMsg('Geolocation is not supported by your browser.');
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const { latitude, longitude, accuracy } = position.coords;
-        setAccuracyValue(accuracy);
-
-        // Safeguard: GPS accuracy MUST be <= 50m
-        if (!accuracy || accuracy > 50.0) {
-          setLocationStatus('poor_accuracy');
-          setLocationErrorMsg(
-            `GPS accuracy is insufficient (±${Math.round(accuracy || 0)}m). Dynamic QR requires classroom location accuracy of 50m or better. If this device cannot provide ≤50m accuracy (common on laptops/desktops without dedicated GPS), please use a phone or tablet with precise location enabled.`
-          );
-          return;
-        }
-
-        const coords = { latitude, longitude, accuracy };
-        setClassroomLocation(coords);
-        classroomLocationRef.current = coords;
-        setLocationStatus('captured');
-        setLocationErrorMsg('');
-
-        // Start dynamic QR generation now that classroom location is established
-        if (fetchAndActivateImmediatelyRef.current) {
-          fetchAndActivateImmediatelyRef.current(coords);
-        }
-      },
-      (geoErr) => {
-        if (geoErr.code === 1) { // PERMISSION_DENIED
-          setLocationStatus('denied');
-          setLocationErrorMsg('Location permission was denied. Dynamic QR attendance requires classroom location to prevent proxy attendance. Please enable location permissions in your browser and click retry.');
-        } else {
-          setLocationStatus('error');
-          setLocationErrorMsg(`Unable to acquire GPS location (${geoErr.message || 'GPS signal unavailable'}). Please ensure device location is enabled and click retry.`);
-        }
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
-    );
-  }, [clearAllTimers]);
-
-  // Pre-fetch the next dynamic QR token ~800ms before current token expires
   const prefetchNextToken = useCallback(async () => {
     if (!isSessionActiveRef.current || !activeCourseRef.current) return;
     if (isFetchingRef.current) return;
@@ -230,7 +166,7 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
       const currentCourse = activeCourseRef.current;
       const currentSession = activeSessionRef.current;
 
-      const data = await generateQrToken(currentCourse, currentSession || null, classroomLocationRef.current);
+      const data = await generateQrToken(currentCourse, currentSession || null);
       if (!isSessionActiveRef.current || activeCourseRef.current !== currentCourse) {
         return;
       }
@@ -304,24 +240,16 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
         isWaitingForNextTokenRef.current = true;
       } else {
         if (fetchAndActivateImmediatelyRef.current) {
-          fetchAndActivateImmediatelyRef.current(classroomLocationRef.current);
+          fetchAndActivateImmediatelyRef.current();
         }
       }
     }
   }, []);
 
   // Fetch immediately and activate on screen (for init, manual regenerate, or recovery)
-  const fetchAndActivateImmediately = useCallback(async (locOverride = null) => {
+  const fetchAndActivateImmediately = useCallback(async () => {
     if (!isSessionActiveRef.current || !activeCourseRef.current) return;
     if (isFetchingRef.current) return;
-
-    const locToUse = locOverride || classroomLocationRef.current;
-    if (!locToUse) {
-      if (requestClassroomLocationRef.current) {
-        requestClassroomLocationRef.current();
-      }
-      return;
-    }
 
     clearAllTimers();
     try {
@@ -332,7 +260,7 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
       const currentCourse = activeCourseRef.current;
       const currentSession = activeSessionRef.current;
 
-      const data = await generateQrToken(currentCourse, currentSession || null, locToUse);
+      const data = await generateQrToken(currentCourse, currentSession || null);
       if (!isSessionActiveRef.current || activeCourseRef.current !== currentCourse) {
         return;
       }
@@ -345,10 +273,10 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
       }
     } catch (err) {
       setError(err.response?.data?.error || err.message || 'Could not generate dynamic QR code.');
-      if (isSessionActiveRef.current && classroomLocationRef.current) {
+      if (isSessionActiveRef.current) {
         retryTimerRef.current = setTimeout(() => {
           if (fetchAndActivateImmediatelyRef.current) {
-            fetchAndActivateImmediatelyRef.current(classroomLocationRef.current);
+            fetchAndActivateImmediatelyRef.current();
           }
         }, 1200);
       }
@@ -359,7 +287,6 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
   }, [clearAllTimers]);
 
   // Keep refs synchronized with latest callback instances
-  requestClassroomLocationRef.current = requestClassroomLocation;
   activateTokenRef.current = activateToken;
   prefetchNextTokenRef.current = prefetchNextToken;
   handleRotationTransitionRef.current = handleRotationTransition;
@@ -369,12 +296,8 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
   const fetchNextQr = useCallback(() => {
     stagedTokenRef.current = null;
     clearAllTimers();
-    if (!classroomLocationRef.current) {
-      if (requestClassroomLocationRef.current) {
-        requestClassroomLocationRef.current();
-      }
-    } else if (fetchAndActivateImmediatelyRef.current) {
-      fetchAndActivateImmediatelyRef.current(classroomLocationRef.current);
+    if (fetchAndActivateImmediatelyRef.current) {
+      fetchAndActivateImmediatelyRef.current();
     }
   }, [clearAllTimers]);
 
@@ -388,12 +311,8 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
       return;
     }
 
-    if (!classroomLocationRef.current) {
-      if (requestClassroomLocationRef.current) {
-        requestClassroomLocationRef.current();
-      }
-    } else if (fetchAndActivateImmediatelyRef.current) {
-      fetchAndActivateImmediatelyRef.current(classroomLocationRef.current);
+    if (fetchAndActivateImmediatelyRef.current) {
+      fetchAndActivateImmediatelyRef.current();
     }
 
     return () => {
@@ -561,12 +480,6 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
                 <span>Every 5 seconds</span>
               </span>
               <span className="meta-chip">
-                <span className="chip-label">Classroom GPS:</span>
-                <strong style={{ color: classroomLocation ? '#059669' : '#d97706' }}>
-                  {classroomLocation ? `±${Math.round(classroomLocation.accuracy)}m` : (locationStatus === 'capturing' ? 'Acquiring...' : 'Pending')}
-                </strong>
-              </span>
-              <span className="meta-chip">
                 <span className="chip-label">Students Present:</span>
                 <strong style={{ color: '#2563eb' }}>{presentStudentsCount} / {totalStudentsCount}</strong>
               </span>
@@ -665,138 +578,10 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
             </div>
           </div>
 
-          {/* Classroom Location Established Banner */}
-          {classroomLocation && (
-            <div style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: '8px',
-              background: '#ecfdf5',
-              border: '1px solid #a7f3d0',
-              color: '#065f46',
-              padding: '8px 14px',
-              borderRadius: '8px',
-              fontSize: '0.85rem',
-              margin: '10px 0 16px 0',
-              fontWeight: 500
-            }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '1.1rem' }}>📍</span>
-                <span>
-                  <strong>Classroom Location Captured:</strong> {classroomLocation.latitude.toFixed(4)}, {classroomLocation.longitude.toFixed(4)}
-                  <span style={{ marginLeft: '6px', color: '#047857' }}>(GPS Accuracy: ±{Math.round(classroomLocation.accuracy)}m)</span>
-                </span>
-              </div>
-              <button
-                type="button"
-                onClick={requestClassroomLocation}
-                style={{
-                  background: 'none',
-                  border: 'none',
-                  color: '#059669',
-                  cursor: 'pointer',
-                  fontSize: '0.8rem',
-                  textDecoration: 'underline',
-                  fontWeight: 600
-                }}
-                title="Recapture classroom location"
-              >
-                Recapture
-              </button>
-            </div>
-          )}
-
           {/* QR Display Frame */}
           <div className="qr-frame-wrapper">
             {isSessionActive ? (
-              locationStatus === 'capturing' ? (
-                <div className="qr-placeholder-box" style={{ padding: '30px 20px', textAlign: 'center' }}>
-                  <div className="loading-spinner" />
-                  <h4 style={{ margin: '14px 0 6px 0', color: '#1e293b' }}>📍 Getting Classroom Location...</h4>
-                  <p style={{ color: '#64748b', fontSize: '0.9rem', maxWidth: '380px', margin: '0 auto 8px auto', lineHeight: '1.4' }}>
-                    Please allow browser location access. This captures your classroom coordinates once to anchor student geofence verification.
-                  </p>
-                  <p style={{ color: '#94a3b8', fontSize: '0.8rem', maxWidth: '380px', margin: '0 auto', lineHeight: '1.3' }}>
-                    Requires ≤50m accuracy. If using a desktop/laptop without GPS hardware, open this session on a phone or tablet with precise location enabled.
-                  </p>
-                </div>
-              ) : locationStatus === 'poor_accuracy' ? (
-                <div className="qr-placeholder-box" style={{ padding: '30px 20px', textAlign: 'center', borderColor: '#f59e0b', background: '#fffbeb' }}>
-                  <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>⚠️</div>
-                  <h4 style={{ margin: '0 0 8px 0', color: '#b45309' }}>GPS Accuracy Insufficient</h4>
-                  <p style={{ color: '#92400e', fontSize: '0.9rem', maxWidth: '420px', margin: '0 auto 12px auto', lineHeight: '1.4' }}>
-                    {locationErrorMsg || `Captured accuracy is ±${Math.round(accuracyValue || 0)}m. High precision (≤50m) is required to ensure classroom geofence integrity.`}
-                  </p>
-                  <div style={{
-                    background: '#fef3c7',
-                    border: '1px solid #fde68a',
-                    borderRadius: '6px',
-                    padding: '10px 14px',
-                    maxWidth: '420px',
-                    margin: '0 auto 16px auto',
-                    fontSize: '0.82rem',
-                    color: '#78350f',
-                    textAlign: 'left',
-                    lineHeight: '1.4'
-                  }}>
-                    💡 <strong>Tip for Faculty:</strong> Laptops and desktop PCs often lack dedicated GPS hardware and rely on coarse Wi-Fi/IP location. If this device cannot provide ≤50m accuracy, please open SmartAttend and launch this session from a mobile phone or tablet with precise location enabled.
-                  </div>
-                  <button
-                    type="button"
-                    className="btn primary-btn"
-                    onClick={requestClassroomLocation}
-                    style={{ background: '#d97706', borderColor: '#b45309' }}
-                  >
-                    🔄 Retry Location Capture
-                  </button>
-                </div>
-              ) : locationStatus === 'denied' ? (
-                <div className="qr-placeholder-box" style={{ padding: '30px 20px', textAlign: 'center', borderColor: '#ef4444', background: '#fef2f2' }}>
-                  <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>🚫</div>
-                  <h4 style={{ margin: '0 0 8px 0', color: '#b91c1c' }}>Location Permission Required</h4>
-                  <p style={{ color: '#991b1b', fontSize: '0.9rem', maxWidth: '380px', margin: '0 auto 16px auto', lineHeight: '1.4' }}>
-                    {locationErrorMsg || 'Browser location permission is required to start Dynamic QR attendance and verify students inside your classroom.'}
-                  </p>
-                  <button
-                    type="button"
-                    className="btn primary-btn"
-                    onClick={requestClassroomLocation}
-                    style={{ background: '#dc2626', borderColor: '#b91c1c' }}
-                  >
-                    🔄 Try Again
-                  </button>
-                </div>
-              ) : locationStatus === 'error' ? (
-                <div className="qr-placeholder-box" style={{ padding: '30px 20px', textAlign: 'center', borderColor: '#ef4444', background: '#fef2f2' }}>
-                  <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>❌</div>
-                  <h4 style={{ margin: '0 0 8px 0', color: '#b91c1c' }}>Location Capture Failed</h4>
-                  <p style={{ color: '#991b1b', fontSize: '0.9rem', maxWidth: '420px', margin: '0 auto 12px auto', lineHeight: '1.4' }}>
-                    {locationErrorMsg || 'Could not acquire GPS coordinates. Please ensure device location is enabled and try again.'}
-                  </p>
-                  <div style={{
-                    background: '#fee2e2',
-                    border: '1px solid #fecaca',
-                    borderRadius: '6px',
-                    padding: '10px 14px',
-                    maxWidth: '420px',
-                    margin: '0 auto 16px auto',
-                    fontSize: '0.82rem',
-                    color: '#7f1d1d',
-                    textAlign: 'left',
-                    lineHeight: '1.4'
-                  }}>
-                    💡 <strong>Note:</strong> If this computer lacks location or GPS sensors, please open SmartAttend and launch this session from a smartphone or tablet with location services enabled.
-                  </div>
-                  <button
-                    type="button"
-                    className="btn primary-btn"
-                    onClick={requestClassroomLocation}
-                  >
-                    🔄 Retry Location Capture
-                  </button>
-                </div>
-              ) : qrToken ? (
+              qrToken ? (
                 <div className="qr-code-display-box">
                   <div className="qr-laser-scanner-line" />
                   <QRCodeSVG

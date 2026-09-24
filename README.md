@@ -7,7 +7,7 @@ Production-oriented monorepo for a proxy-resistant student attendance platform w
 - `frontend/`: React 19 + Vite student, teacher, HOD, and administrator interface.
 - `backend/`: Java 21 + Spring Boot 3 + Spring Data JPA + MySQL 8 REST API.
 - Server-authoritative time for 5-second dynamic QR tokens with atomic consumption.
-- Three mandatory attendance checks: immutable hardware/browser device binding, campus Haversine geofence, and 5-second QR validation.
+- Mandatory attendance security: single-scan 5-second dynamic QR token rotation, cohort validation, and immutable hardware/browser device binding.
 - One-time QR token consumption is stored and enforced in MySQL to prevent replay attacks.
 - Moodle calls are server-side only; the Moodle institutional token is never exposed to the browser.
 

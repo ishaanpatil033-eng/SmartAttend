@@ -20,6 +20,14 @@ public class QrScanRequest {
         this.qrToken = qrToken;
     }
 
+    public QrScanRequest(String studentId, String courseId, String qrToken, String sessionCode, String deviceFingerprint) {
+        this.studentId = studentId;
+        this.courseId = courseId;
+        this.qrToken = qrToken;
+        this.sessionCode = sessionCode;
+        this.deviceFingerprint = deviceFingerprint;
+    }
+
     public QrScanRequest(String studentId, String courseId, String qrToken, String sessionCode, Double latitude, Double longitude, Double accuracy, String deviceFingerprint) {
         this.studentId = studentId;
         this.courseId = courseId;

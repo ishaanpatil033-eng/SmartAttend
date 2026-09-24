@@ -61,18 +61,6 @@ public class AttendanceService {
     private final SecurityAuditService securityAuditService;
     private final LectureSessionRepository lectureSessionRepository;
 
-    @Value("${attendance.location.latitude:19.0760}")
-    private double targetLatitude;
-
-    @Value("${attendance.location.longitude:72.8777}")
-    private double targetLongitude;
-
-    @Value("${attendance.location.radius-meters:100.0}")
-    private double allowedRadiusMeters;
-
-    @Value("${attendance.location.max-accuracy-meters:50.0}")
-    private double maxAccuracyMeters;
-
     public AttendanceService(AttendanceRepository attendanceRepository,
                              AttendanceQrTokenRepository qrTokenRepository,
                              StudentRepository studentRepository,
@@ -128,7 +116,7 @@ public class AttendanceService {
      * - Authentication session identity (client studentId rejected if tampering)
      * - 5-second server-side token expiry
      * - Atomic token consumption (no race conditions)
-     * - Real GPS coordinates & Haversine geofencing distance check
+     * - Course & cohort matching validation
      * - One device — One student — One lecture session binding
      */
     @Transactional
@@ -232,48 +220,11 @@ public class AttendanceService {
                 ? tokenEntity.getSessionCode().trim()
                 : (courseId + "_SES_" + LocalDate.now());
 
-        // 7. Verify GPS Geolocation & Haversine Distance
-        if (scanRequest.getLatitude() == null || scanRequest.getLongitude() == null) {
-            securityAuditService.logEvent("GEOFENCE_REJECTION", authenticatedUsername, resolvedStudentId, clientIp, userAgent, courseId, sessionCode, "Missing GPS coordinates");
-            throw new IllegalArgumentException("Location permission required for attendance. Please enable GPS location services.");
-        }
-        if (scanRequest.getLatitude() < -90.0 || scanRequest.getLatitude() > 90.0 ||
-            scanRequest.getLongitude() < -180.0 || scanRequest.getLongitude() > 180.0) {
-            securityAuditService.logEvent("GEOFENCE_REJECTION", authenticatedUsername, resolvedStudentId, clientIp, userAgent, courseId, sessionCode, "Invalid GPS coordinates");
-            throw new IllegalArgumentException("Invalid GPS coordinates provided.");
-        }
-        if (scanRequest.getAccuracy() == null || scanRequest.getAccuracy() > maxAccuracyMeters) {
-            securityAuditService.logEvent("GEOFENCE_REJECTION", authenticatedUsername, resolvedStudentId, clientIp, userAgent, courseId, sessionCode, "GPS accuracy insufficient: " + scanRequest.getAccuracy());
-            throw new IllegalArgumentException("Attendance rejected: GPS accuracy is insufficient (" + Math.round(scanRequest.getAccuracy() != null ? scanRequest.getAccuracy() : 0) + "m). Maximum allowed is " + Math.round(maxAccuracyMeters) + "m.");
-        }
-
-        double sessionTargetLatitude;
-        double sessionTargetLongitude;
-
         Optional<LectureSession> sessionOpt = (sessionCode != null && !sessionCode.trim().isEmpty())
                 ? lectureSessionRepository.findBySessionCode(sessionCode.trim())
                 : Optional.empty();
 
-        if (sessionOpt.isPresent()) {
-            LectureSession session = sessionOpt.get();
-            if (session.getClassroomLatitude() == null || session.getClassroomLongitude() == null) {
-                securityAuditService.logEvent("GEOFENCE_REJECTION", authenticatedUsername, resolvedStudentId, clientIp, userAgent, courseId, sessionCode, "Classroom location not established");
-                throw new IllegalArgumentException("Attendance rejected: Classroom location has not been established for this class session. Please ask your faculty to launch Dynamic QR attendance.");
-            }
-            sessionTargetLatitude = session.getClassroomLatitude();
-            sessionTargetLongitude = session.getClassroomLongitude();
-        } else {
-            sessionTargetLatitude = targetLatitude;
-            sessionTargetLongitude = targetLongitude;
-        }
-
-        double distance = calculateHaversineDistance(scanRequest.getLatitude(), scanRequest.getLongitude(), sessionTargetLatitude, sessionTargetLongitude);
-        if (distance > allowedRadiusMeters) {
-            securityAuditService.logEvent("GEOFENCE_REJECTION", authenticatedUsername, resolvedStudentId, clientIp, userAgent, courseId, sessionCode, "Outside geofence: distance " + Math.round(distance) + "m");
-            throw new IllegalArgumentException("Attendance rejected: you are outside the allowed classroom area (" + Math.round(distance) + "m away, maximum allowed is " + Math.round(allowedRadiusMeters) + "m).");
-        }
-
-        // 8. Device / Browser Identification & One-Device-One-Student-One-Lecture Rule
+        // 7. Device / Browser Identification & One-Device-One-Student-One-Lecture Rule
         if (scanRequest.getDeviceFingerprint() == null || scanRequest.getDeviceFingerprint().trim().isEmpty()) {
             securityAuditService.logEvent("DEVICE_BINDING_REJECTION", authenticatedUsername, resolvedStudentId, clientIp, userAgent, courseId, sessionCode, "Missing device fingerprint");
             throw new IllegalArgumentException("Device identification required for attendance.");
@@ -347,16 +298,6 @@ public class AttendanceService {
         return saved;
     }
 
-    public double calculateHaversineDistance(double lat1, double lon1, double lat2, double lon2) {
-        final double R = 6371000.0; // Earth radius in meters
-        double dLat = Math.toRadians(lat2 - lat1);
-        double dLon = Math.toRadians(lon2 - lon1);
-        double a = Math.sin(dLat / 2.0) * Math.sin(dLat / 2.0)
-                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
-                * Math.sin(dLon / 2.0) * Math.sin(dLon / 2.0);
-        double c = 2.0 * Math.atan2(Math.sqrt(a), Math.sqrt(1.0 - a));
-        return R * c;
-    }
 
     /**
      * Standard manual attendance recording.

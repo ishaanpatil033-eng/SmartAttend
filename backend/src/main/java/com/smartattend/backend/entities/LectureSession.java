@@ -66,15 +66,6 @@ public class LectureSession {
     @Column(name = "created_at", nullable = false)
     private Instant createdAt = Instant.now();
 
-    @Column(name = "classroom_latitude")
-    private Double classroomLatitude;
-
-    @Column(name = "classroom_longitude")
-    private Double classroomLongitude;
-
-    @Column(name = "classroom_accuracy")
-    private Double classroomAccuracy;
-
     @Transient
     private long attendanceCount = 0;
 
@@ -229,29 +220,5 @@ public class LectureSession {
 
     public void setTotalStudents(long totalStudents) {
         this.totalStudents = totalStudents;
-    }
-
-    public Double getClassroomLatitude() {
-        return classroomLatitude;
-    }
-
-    public void setClassroomLatitude(Double classroomLatitude) {
-        this.classroomLatitude = classroomLatitude;
-    }
-
-    public Double getClassroomLongitude() {
-        return classroomLongitude;
-    }
-
-    public void setClassroomLongitude(Double classroomLongitude) {
-        this.classroomLongitude = classroomLongitude;
-    }
-
-    public Double getClassroomAccuracy() {
-        return classroomAccuracy;
-    }
-
-    public void setClassroomAccuracy(Double classroomAccuracy) {
-        this.classroomAccuracy = classroomAccuracy;
     }
 }

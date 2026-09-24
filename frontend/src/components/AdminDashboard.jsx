@@ -235,9 +235,7 @@ const AdminDashboard = ({ currentUser, activeSubTab, onSubTabChange }) => {
     warningThreshold: 80,
     lateMarkToleranceMinutes: 10,
     dynamicQrCycleSeconds: 5,
-    gpsGeofenceEnabled: true,
-    gpsGeofenceRadiusMeters: 100,
-    gpsToleranceMeters: 50,
+    dynamicQrRotationEnforced: true,
     deviceBindingEnforced: true,
     autoDefaulterCalculation: true,
     moodleSyncIntervalHours: 6
@@ -4058,11 +4056,11 @@ const AdminDashboard = ({ currentUser, activeSubTab, onSubTabChange }) => {
                 </div>
               </div>
 
-              {/* Dynamic QR & Geofence Security */}
+              {/* Dynamic QR Security */}
               <div style={{ background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: '10px', padding: '18px' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
                   <span style={{ fontSize: '1.2rem' }}>🛡️</span>
-                  <h4 style={{ margin: 0, fontSize: '1rem', color: '#0f172a' }}>QR &amp; Geofencing Engine</h4>
+                  <h4 style={{ margin: 0, fontSize: '1rem', color: '#0f172a' }}>Dynamic QR Engine</h4>
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', fontSize: '0.88rem' }}>
                   <div>
@@ -4070,8 +4068,8 @@ const AdminDashboard = ({ currentUser, activeSubTab, onSubTabChange }) => {
                     <strong style={{ color: '#1e293b' }}>5 Seconds (Cryptographic HMAC)</strong>
                   </div>
                   <div>
-                    <span style={{ color: '#64748b', display: 'block', fontSize: '0.78rem', fontWeight: 600 }}>CAMPUS GPS GEOFENCING</span>
-                    <span className="pill pill-success">Enforced (Radius: 100m)</span>
+                    <span style={{ color: '#64748b', display: 'block', fontSize: '0.78rem', fontWeight: 600 }}>TOKEN EXPIRY VALIDATION</span>
+                    <span className="pill pill-success">Enforced Server-Side (5s Window)</span>
                   </div>
                   <div>
                     <span style={{ color: '#64748b', display: 'block', fontSize: '0.78rem', fontWeight: 600 }}>DEVICE HARDWARE BINDING</span>

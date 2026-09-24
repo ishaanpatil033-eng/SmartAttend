@@ -550,23 +550,15 @@ public class SmartAttendWorkflowTests {
         Long sessionId = createdSession.getId();
         assertNotNull(sessionCode);
 
-        // 3. Faculty launches 5-second dynamic QR with captured classroom coordinates
+        // 3. Faculty launches 5-second dynamic QR
         MvcResult qrResult = mockMvc.perform(post("/api/attendance/qr/generate")
                 .session(facultySession)
                 .param("courseId", "FSJP")
-                .param("sessionCode", sessionCode)
-                .param("latitude", "19.0760")
-                .param("longitude", "72.8777")
-                .param("accuracy", "10.0"))
+                .param("sessionCode", sessionCode))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.token").isNotEmpty())
                 .andExpect(jsonPath("$.expiresInSeconds").value(5))
                 .andReturn();
-
-        LectureSession storedSession = lectureSessionRepository.findBySessionCode(sessionCode).orElseThrow();
-        assertEquals(19.0760, storedSession.getClassroomLatitude(), 0.0001);
-        assertEquals(72.8777, storedSession.getClassroomLongitude(), 0.0001);
-        assertEquals(10.0, storedSession.getClassroomAccuracy(), 0.1);
 
         String qrToken = objectMapper.readTree(qrResult.getResponse().getContentAsString()).get("token").asText();
 
@@ -586,31 +578,11 @@ public class SmartAttendWorkflowTests {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].courseId").value("FSJP"));
 
-        // 6. Student scans with GPS OUTSIDE geofence (e.g. lat 19.5, lon 73.0) -> Rejected
-        com.smartattend.backend.dtos.QrScanRequest outOfGeofenceReq = new com.smartattend.backend.dtos.QrScanRequest();
-        outOfGeofenceReq.setCourseId("FSJP");
-        outOfGeofenceReq.setSessionCode(sessionCode);
-        outOfGeofenceReq.setQrToken(qrToken);
-        outOfGeofenceReq.setLatitude(19.5000);
-        outOfGeofenceReq.setLongitude(73.0000);
-        outOfGeofenceReq.setAccuracy(10.0);
-        outOfGeofenceReq.setDeviceFingerprint("FP-TEST-STUDENT-DEVICE");
-
-        mockMvc.perform(post("/api/attendance/qr/scan")
-                .session(studentSession)
-                .contentType(MediaType.APPLICATION_JSON)
-                .content(objectMapper.writeValueAsString(outOfGeofenceReq)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("outside the allowed classroom area")));
-
-        // 7. Student scans with VALID classroom coordinates (19.0760, 72.8777 within 100m) -> PRESENT 201 Created
+        // 6. Student scans with VALID 5-second dynamic QR -> PRESENT 201 Created
         com.smartattend.backend.dtos.QrScanRequest validScanReq = new com.smartattend.backend.dtos.QrScanRequest();
         validScanReq.setCourseId("FSJP");
         validScanReq.setSessionCode(sessionCode);
         validScanReq.setQrToken(qrToken);
-        validScanReq.setLatitude(19.0760);
-        validScanReq.setLongitude(72.8777);
-        validScanReq.setAccuracy(15.0);
         validScanReq.setDeviceFingerprint("FP-TEST-STUDENT-DEVICE");
 
         mockMvc.perform(post("/api/attendance/qr/scan")
@@ -621,7 +593,7 @@ public class SmartAttendWorkflowTests {
                 .andExpect(jsonPath("$.success").value(true))
                 .andExpect(jsonPath("$.attendance.attendanceStatus").value("PRESENT"));
 
-        // 8a. Re-scanning the consumed token -> Rejected 400 Bad Request (already consumed/used)
+        // 7a. Re-scanning the consumed token -> Rejected 400 Bad Request (already consumed/used)
         mockMvc.perform(post("/api/attendance/qr/scan")
                 .session(studentSession)
                 .contentType(MediaType.APPLICATION_JSON)
@@ -629,7 +601,7 @@ public class SmartAttendWorkflowTests {
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("already been used")));
 
-        // 8b. Scanning with a NEW live token for the same session -> Rejected 409 Conflict (Duplicate student attendance)
+        // 7b. Scanning with a NEW live token for the same session -> Rejected 409 Conflict (Duplicate student attendance)
         MvcResult nextQrResult = mockMvc.perform(post("/api/attendance/qr/generate")
                 .session(facultySession)
                 .param("courseId", "FSJP")
@@ -646,7 +618,7 @@ public class SmartAttendWorkflowTests {
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("already been marked")));
 
-        // 9. Expired QR scan -> Rejected
+        // 8. Expired QR scan -> Rejected
         AttendanceQrToken expiredTokenEntity = new AttendanceQrToken("EXPIRED-FSJP-TOKEN", "FSJP", sessionCode, java.time.Instant.now().minusSeconds(20), java.time.Instant.now().minusSeconds(10));
         qrTokenRepository.save(expiredTokenEntity);
 
@@ -654,9 +626,6 @@ public class SmartAttendWorkflowTests {
         expiredScanReq.setCourseId("FSJP");
         expiredScanReq.setSessionCode(sessionCode);
         expiredScanReq.setQrToken("EXPIRED-FSJP-TOKEN");
-        expiredScanReq.setLatitude(19.0760);
-        expiredScanReq.setLongitude(72.8777);
-        expiredScanReq.setAccuracy(15.0);
         expiredScanReq.setDeviceFingerprint("FP-TEST-STUDENT-DEVICE-2");
 
         mockMvc.perform(post("/api/attendance/qr/scan")

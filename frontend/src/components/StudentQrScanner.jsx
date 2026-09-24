@@ -14,11 +14,9 @@ const StudentQrScanner = ({
   const [qrToken, setQrToken] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const [scanStage, setScanStage] = useState('idle'); // 'idle' | 'scanning' | 'verifying_location' | 'submitting' | 'success'
+  const [scanStage, setScanStage] = useState('idle'); // 'idle' | 'scanning' | 'submitting' | 'success'
   const [cameraError, setCameraError] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
-  const [locationStatus, setLocationStatus] = useState('idle'); // 'idle' | 'locating' | 'ready' | 'denied'
-  const [locationCoords, setLocationCoords] = useState(null);
   const [successData, setSuccessData] = useState(null);
 
   const [availableCourses, setAvailableCourses] = useState([]);
@@ -26,8 +24,6 @@ const StudentQrScanner = ({
 
   const html5QrCodeRef = useRef(null);
   const scannerContainerId = 'qr-camera-viewport';
-  const latestLocationRef = useRef(null);
-  const locationWatchIdRef = useRef(null);
 
   // Synchronize course ID prop
   useEffect(() => {
@@ -48,121 +44,7 @@ const StudentQrScanner = ({
     }
   }, [initialStudentId]);
 
-  // Pre-warm and continuously maintain geolocation while scanner workspace is active
-  useEffect(() => {
-    if (!navigator.geolocation) {
-      setLocationStatus('denied');
-      return;
-    }
 
-    setLocationStatus('locating');
-
-    const handleSuccess = (position) => {
-      const coords = {
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        accuracy: position.coords.accuracy,
-        timestamp: position.timestamp || Date.now()
-      };
-      latestLocationRef.current = coords;
-      setLocationCoords(coords);
-      setLocationStatus('ready');
-    };
-
-    const handleError = (error) => {
-      if (!latestLocationRef.current) {
-        setLocationStatus(error.code === 1 ? 'denied' : 'idle');
-      }
-    };
-
-    // 1. Initial quick location query allowing recent cached coordinates (up to 30 seconds)
-    navigator.geolocation.getCurrentPosition(handleSuccess, handleError, {
-      enableHighAccuracy: true,
-      timeout: 8000,
-      maximumAge: 30000
-    });
-
-    // 2. Active position watcher while scanner component is open
-    let watchId = null;
-    try {
-      watchId = navigator.geolocation.watchPosition(handleSuccess, handleError, {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 15000
-      });
-      locationWatchIdRef.current = watchId;
-    } catch (_) {}
-
-    return () => {
-      if (locationWatchIdRef.current !== null) {
-        navigator.geolocation.clearWatch(locationWatchIdRef.current);
-        locationWatchIdRef.current = null;
-      }
-    };
-  }, []);
-
-  // Retrieve effective location: 0ms instantaneous if pre-warmed, or short fallback wait
-  const getEffectiveLocation = useCallback(() => {
-    // 1. If valid, sufficiently recent location (< 45s) is already in memory, return immediately
-    if (latestLocationRef.current) {
-      const ageMs = Date.now() - (latestLocationRef.current.timestamp || 0);
-      if (ageMs < 45000) {
-        return Promise.resolve(latestLocationRef.current);
-      }
-    }
-
-    if (!navigator.geolocation) {
-      return Promise.reject(new Error('Geolocation is not supported by your browser.'));
-    }
-
-    // 2. If no location yet (e.g. instant scan within first second), briefly wait without blocking indefinitely
-    setLocationStatus('locating');
-
-    return new Promise((resolve, reject) => {
-      let resolved = false;
-      const timer = setTimeout(() => {
-        if (!resolved) {
-          resolved = true;
-          if (latestLocationRef.current) {
-            resolve(latestLocationRef.current);
-          } else {
-            reject(new Error('Attendance rejected: Location unavailable or GPS timed out. Please ensure GPS is enabled and retry.'));
-          }
-        }
-      }, 3500);
-
-      navigator.geolocation.getCurrentPosition(
-        (pos) => {
-          if (!resolved) {
-            resolved = true;
-            clearTimeout(timer);
-            const coords = {
-              latitude: pos.coords.latitude,
-              longitude: pos.coords.longitude,
-              accuracy: pos.coords.accuracy,
-              timestamp: pos.timestamp || Date.now()
-            };
-            latestLocationRef.current = coords;
-            setLocationCoords(coords);
-            setLocationStatus('ready');
-            resolve(coords);
-          }
-        },
-        (err) => {
-          if (!resolved) {
-            resolved = true;
-            clearTimeout(timer);
-            if (latestLocationRef.current) {
-              resolve(latestLocationRef.current);
-            } else {
-              reject(err);
-            }
-          }
-        },
-        { enableHighAccuracy: true, timeout: 3500, maximumAge: 30000 }
-      );
-    });
-  }, []);
 
   // Load registered courses from MySQL
   useEffect(() => {
@@ -246,7 +128,7 @@ const StudentQrScanner = ({
     };
   }, [stopCamera]);
 
-  // Core attendance submission handler with GPS Geolocation and Device Fingerprinting
+  // Core attendance submission handler with Device Fingerprinting
   const submitAttendance = useCallback(
     async (tokenToSubmit) => {
       const activeToken = (tokenToSubmit || qrToken || '').trim();
@@ -261,35 +143,18 @@ const StudentQrScanner = ({
       }
 
       setSubmitting(true);
-      setScanStage('verifying_location');
+      setScanStage('submitting');
 
-      // 1. Acquire real GPS coordinates (instantaneous via pre-warmed memory cache)
-      let coords;
-      try {
-        coords = await getEffectiveLocation();
-        setScanStage('submitting');
-      } catch (geoErr) {
-        setLocationStatus('denied');
-        setSubmitting(false);
-        hasScannedRef.current = false;
-        setScanStage('idle');
-        setErrorMsg('Could not acquire your device GPS location. Please make sure location access is enabled for your browser and device, then try again.');
-        return;
-      }
-
-      // 2. Generate stable device fingerprint
+      // Generate stable device fingerprint
       const deviceFingerprint = getDeviceFingerprint();
 
       try {
-        // 3. Dispatch to backend with Spring Security Session authentication
+        // Dispatch to backend with Spring Security Session authentication
         const result = await scanQrAttendance({
           qrToken: activeToken,
           courseId: activeCourse,
           sessionCode: sessionCode || undefined,
           studentId: studentId || undefined,
-          latitude: coords.latitude,
-          longitude: coords.longitude,
-          accuracy: coords.accuracy,
           deviceFingerprint: deviceFingerprint
         });
 
@@ -327,14 +192,6 @@ const StudentQrScanner = ({
           setErrorMsg('This QR code has expired. Please scan the latest QR displayed by your faculty.');
         } else if (rawLower.includes('already been marked') || rawLower.includes('already marked') || err.response?.status === 409) {
           setErrorMsg('Your attendance is already marked for this session.');
-        } else if (rawLower.includes('classroom location has not been established')) {
-          setErrorMsg(rawErr);
-        } else if (rawLower.includes('outside the allowed classroom area')) {
-          setErrorMsg(rawErr);
-        } else if (rawLower.includes('gps accuracy is insufficient')) {
-          setErrorMsg(rawErr);
-        } else if (rawLower.includes('location permission required') || rawLower.includes('missing gps')) {
-          setErrorMsg('Location permission required for attendance. Please enable device GPS location services in your browser.');
         } else if (
           rawLower.includes('belongs to course') ||
           rawLower.includes('division') ||
@@ -365,7 +222,7 @@ const StudentQrScanner = ({
         setSubmitting(false);
       }
     },
-    [qrToken, studentId, courseId, sessionCode, currentStudentName, currentCourseName, stopCamera, getEffectiveLocation]
+    [qrToken, studentId, courseId, sessionCode, currentStudentName, currentCourseName, stopCamera]
   );
 
   // Start Camera QR Scanner
@@ -520,10 +377,6 @@ const StudentQrScanner = ({
                 <span>5-Second Rotation</span>
               </span>
               <span className="meta-chip">
-                <span className="chip-label">Geofence:</span>
-                <span>Haversine GPS Verified</span>
-              </span>
-              <span className="meta-chip">
                 <span className="chip-label">Anti-Proxy:</span>
                 <span>One-Device-One-Lecture</span>
               </span>
@@ -559,17 +412,17 @@ const StudentQrScanner = ({
             <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
               <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ background: '#dbeafe', color: '#1d4ed8', width: '22px', height: '22px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 800 }}>1</span>
-                Enable Location
+                Select Course
               </div>
-              <p style={{ margin: '6px 0 0 0', fontSize: '0.8rem', color: '#64748b', lineHeight: 1.4 }}>Make sure device location / GPS is turned ON in your browser.</p>
+              <p style={{ margin: '6px 0 0 0', fontSize: '0.8rem', color: '#64748b', lineHeight: 1.4 }}>Confirm your enrolled course is selected before scanning.</p>
             </div>
 
             <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
               <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ background: '#dbeafe', color: '#1d4ed8', width: '22px', height: '22px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 800 }}>2</span>
-                Be Inside Classroom
+                Faculty Active Session
               </div>
-              <p style={{ margin: '6px 0 0 0', fontSize: '0.8rem', color: '#64748b', lineHeight: 1.4 }}>Physical presence inside the allowed classroom area is verified.</p>
+              <p style={{ margin: '6px 0 0 0', fontSize: '0.8rem', color: '#64748b', lineHeight: 1.4 }}>Ensure the faculty dynamic QR screen is actively running.</p>
             </div>
 
             <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
@@ -583,7 +436,7 @@ const StudentQrScanner = ({
             <div style={{ background: '#ffffff', padding: '12px 14px', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
               <div style={{ fontWeight: 700, fontSize: '0.85rem', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <span style={{ background: '#dbeafe', color: '#1d4ed8', width: '22px', height: '22px', borderRadius: '50%', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', fontWeight: 800 }}>4</span>
-                Verify Attendance
+                Instant Attendance
               </div>
               <p style={{ margin: '6px 0 0 0', fontSize: '0.8rem', color: '#64748b', lineHeight: 1.4 }}>Instant verification and confirmation logged to your records.</p>
             </div>
@@ -604,9 +457,9 @@ const StudentQrScanner = ({
             gap: '14px',
             fontWeight: 700,
             fontSize: '1rem',
-            background: scanStage === 'verifying_location' ? '#fef3c7' : scanStage === 'submitting' ? '#e0e7ff' : '#dbeafe',
-            color: scanStage === 'verifying_location' ? '#92400e' : scanStage === 'submitting' ? '#3730a3' : '#1e40af',
-            border: `1px solid ${scanStage === 'verifying_location' ? '#fcd34d' : scanStage === 'submitting' ? '#c7d2fe' : '#93c5fd'}`,
+            background: scanStage === 'submitting' ? '#e0e7ff' : '#dbeafe',
+            color: scanStage === 'submitting' ? '#3730a3' : '#1e40af',
+            border: `1px solid ${scanStage === 'submitting' ? '#c7d2fe' : '#93c5fd'}`,
             boxShadow: '0 2px 8px rgba(0,0,0,0.05)'
           }}
         >
@@ -623,9 +476,7 @@ const StudentQrScanner = ({
             }}
           />
           <span>
-            {scanStage === 'verifying_location'
-              ? 'Checking your classroom location... Please wait.'
-              : scanStage === 'submitting'
+            {scanStage === 'submitting'
               ? 'QR verified. Marking attendance...'
               : 'Scanning current attendance QR...'}
           </span>
@@ -736,7 +587,7 @@ const StudentQrScanner = ({
             </div>
 
             <p className="scanner-section-intro">
-              Position the classroom projected QR code inside the reticle box. GPS location and device security will be verified automatically upon scanning.
+              Position the classroom projected QR code inside the reticle box. Token validity and device security will be verified automatically upon scanning.
             </p>
 
             <div className="camera-viewport-container">
@@ -759,7 +610,7 @@ const StudentQrScanner = ({
 
             <div className="camera-hints-box">
               <span className="hint-pill">💡 Tip</span>
-              <span>Ensure browser location permission is enabled when prompted. Point camera directly at the code.</span>
+              <span>Point camera directly at the live dynamic QR code displayed by your faculty.</span>
             </div>
           </div>
 
@@ -838,19 +689,13 @@ const StudentQrScanner = ({
                 </span>
               </div>
 
-              {locationCoords && (
-                <div className="location-status-badge">
-                  📍 GPS Acquired: {locationCoords.latitude.toFixed(4)}, {locationCoords.longitude.toFixed(4)} (±{Math.round(locationCoords.accuracy)}m)
-                </div>
-              )}
-
               <div className="form-action-row">
                 <button
                   type="submit"
                   className="btn primary-btn submit-attendance-btn"
                   disabled={submitting || !qrToken.trim()}
                 >
-                  {submitting ? 'Verifying GPS & Security...' : '✓ Mark Attendance Now'}
+                  {submitting ? 'Verifying QR & Security...' : '✓ Mark Attendance Now'}
                 </button>
               </div>
             </form>

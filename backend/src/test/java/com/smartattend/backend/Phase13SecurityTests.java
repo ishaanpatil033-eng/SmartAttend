@@ -80,8 +80,6 @@ public class Phase13SecurityTests {
     @Autowired
     private SecurityAuditLogRepository auditLogRepository;
 
-    private static final double CLASSROOM_LAT = 19.0760;
-    private static final double CLASSROOM_LON = 72.8777;
 
     @BeforeEach
     void setUp() {
@@ -181,7 +179,7 @@ public class Phase13SecurityTests {
     @Test
     @DisplayName("4. Unauthenticated attendance scan is rejected with 401 Unauthorized")
     void testUnauthenticatedAttendanceRejected() throws Exception {
-        QrScanRequest scanReq = new QrScanRequest("STU101", "CS101", "tok-123", "SES-1", CLASSROOM_LAT, CLASSROOM_LON, 10.0, "dev-1");
+        QrScanRequest scanReq = new QrScanRequest("STU101", "CS101", "tok-123", "SES-1", "dev-1");
         mockMvc.perform(post("/api/attendance/qr/scan")
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(scanReq)))
@@ -240,9 +238,6 @@ public class Phase13SecurityTests {
                 "CS101",
                 token.getToken(),
                 token.getSessionCode(),
-                CLASSROOM_LAT,
-                CLASSROOM_LON,
-                10.0,
                 "device-fingerprint-001"
         );
 
@@ -259,7 +254,7 @@ public class Phase13SecurityTests {
     }
 
     @Test
-    @DisplayName("10. Valid attendance scan inside geofence with valid device succeeds")
+    @DisplayName("10. Valid attendance scan with valid device succeeds")
     void testValidAttendanceScan() throws Exception {
         MockHttpSession studentSession = loginAs("STU101", "Student@123");
         QrTokenResponse token = attendanceService.generateDynamicQrToken("CS101", "SES_CS101_VALID");
@@ -269,9 +264,6 @@ public class Phase13SecurityTests {
                 "CS101",
                 token.getToken(),
                 token.getSessionCode(),
-                CLASSROOM_LAT,
-                CLASSROOM_LON,
-                15.0,
                 "device-fingerprint-101"
         );
 
@@ -305,9 +297,6 @@ public class Phase13SecurityTests {
                 "CS101",
                 token.getToken(),
                 token.getSessionCode(),
-                CLASSROOM_LAT,
-                CLASSROOM_LON,
-                10.0,
                 "device-fingerprint-101"
         );
 
@@ -330,9 +319,6 @@ public class Phase13SecurityTests {
                 "CS101",
                 token.getToken(),
                 token.getSessionCode(),
-                CLASSROOM_LAT,
-                CLASSROOM_LON,
-                10.0,
                 "device-fingerprint-101"
         );
 
@@ -362,9 +348,6 @@ public class Phase13SecurityTests {
                 "CS101", // Wrong course ID sent
                 token.getToken(),
                 token.getSessionCode(),
-                CLASSROOM_LAT,
-                CLASSROOM_LON,
-                10.0,
                 "device-fingerprint-101"
         );
 
@@ -377,27 +360,19 @@ public class Phase13SecurityTests {
     }
 
     // =========================================================================
-    // 4. GPS & HAVERSINE GEOFENCING TESTS
+    // 4. DYNAMIC QR TOKEN INTEGRITY TESTS (NO GPS REQUIRED)
     // =========================================================================
 
     @Test
-    @DisplayName("14. GPS location outside geofence is rejected")
-    void testOutsideGeofenceRejected() throws Exception {
+    @DisplayName("14. Invalid QR token format is rejected")
+    void testInvalidQrTokenRejected() throws Exception {
         MockHttpSession studentSession = loginAs("STU101", "Student@123");
-        QrTokenResponse token = attendanceService.generateDynamicQrToken("CS101", "SES_CS101_GEO");
-
-        // Coordinates ~5 km away in Mumbai
-        double remoteLat = 19.1200;
-        double remoteLon = 72.8500;
 
         QrScanRequest req = new QrScanRequest(
                 "STU101",
                 "CS101",
-                token.getToken(),
-                token.getSessionCode(),
-                remoteLat,
-                remoteLon,
-                10.0,
+                "invalid-token-uuid-123",
+                "SES_CS101_INV",
                 "device-fingerprint-101"
         );
 
@@ -406,23 +381,19 @@ public class Phase13SecurityTests {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("outside the allowed classroom area")));
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("Invalid QR code")));
     }
 
     @Test
-    @DisplayName("15. GPS accuracy too poor (> 50m) is rejected")
-    void testPoorGpsAccuracyRejected() throws Exception {
+    @DisplayName("15. Blank QR token is rejected")
+    void testBlankQrTokenRejected() throws Exception {
         MockHttpSession studentSession = loginAs("STU101", "Student@123");
-        QrTokenResponse token = attendanceService.generateDynamicQrToken("CS101", "SES_CS101_ACC");
 
         QrScanRequest req = new QrScanRequest(
                 "STU101",
                 "CS101",
-                token.getToken(),
-                token.getSessionCode(),
-                CLASSROOM_LAT,
-                CLASSROOM_LON,
-                120.0, // Accuracy 120m > 50m threshold
+                "",
+                "SES_CS101_BLANK",
                 "device-fingerprint-101"
         );
 
@@ -430,24 +401,19 @@ public class Phase13SecurityTests {
                 .session(studentSession)
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
-                .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("GPS accuracy is insufficient")));
+                .andExpect(status().isBadRequest());
     }
 
     @Test
-    @DisplayName("16. Missing GPS location is rejected")
-    void testMissingGpsRejected() throws Exception {
+    @DisplayName("16. Non-existent QR token is rejected")
+    void testNonExistentQrTokenRejected() throws Exception {
         MockHttpSession studentSession = loginAs("STU101", "Student@123");
-        QrTokenResponse token = attendanceService.generateDynamicQrToken("CS101", "SES_CS101_MISS");
 
         QrScanRequest req = new QrScanRequest(
                 "STU101",
                 "CS101",
-                token.getToken(),
-                token.getSessionCode(),
-                null,
-                null,
-                null,
+                "non-existent-token-xyz-999",
+                "SES_CS101_NON",
                 "device-fingerprint-101"
         );
 
@@ -456,7 +422,7 @@ public class Phase13SecurityTests {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(objectMapper.writeValueAsString(req)))
                 .andExpect(status().isBadRequest())
-                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("Location permission required")));
+                .andExpect(jsonPath("$.error").value(org.hamcrest.Matchers.containsString("Invalid QR code")));
     }
 
     // =========================================================================
@@ -478,9 +444,6 @@ public class Phase13SecurityTests {
                 "CS101",
                 tokenA.getToken(),
                 sessionCode,
-                CLASSROOM_LAT,
-                CLASSROOM_LON,
-                10.0,
                 sharedDevice
         );
 
@@ -502,9 +465,6 @@ public class Phase13SecurityTests {
                 "CS101",
                 tokenB.getToken(),
                 sessionCode,
-                CLASSROOM_LAT,
-                CLASSROOM_LON,
-                10.0,
                 sharedDevice // Identical device used!
         );
 
@@ -531,9 +491,6 @@ public class Phase13SecurityTests {
                 "CS101",
                 token1.getToken(),
                 "LEC_CS101_SES_1",
-                CLASSROOM_LAT,
-                CLASSROOM_LON,
-                10.0,
                 sharedDevice
         );
         mockMvc.perform(post("/api/attendance/qr/scan").session(sessionA).contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(reqA)))
@@ -550,9 +507,6 @@ public class Phase13SecurityTests {
                 "MATH201",
                 token2.getToken(),
                 "LEC_MATH201_SES_2",
-                CLASSROOM_LAT,
-                CLASSROOM_LON,
-                10.0,
                 sharedDevice
         );
         mockMvc.perform(post("/api/attendance/qr/scan").session(sessionB).contentType(MediaType.APPLICATION_JSON).content(objectMapper.writeValueAsString(reqB)))
@@ -582,7 +536,7 @@ public class Phase13SecurityTests {
             executor.submit(() -> {
                 try {
                     latch.await(); // wait for simultaneous release
-                    QrScanRequest req = new QrScanRequest(studentId, "CS101", token.getToken(), "CONCURRENT_SES_1", CLASSROOM_LAT, CLASSROOM_LON, 10.0, deviceId);
+                    QrScanRequest req = new QrScanRequest(studentId, "CS101", token.getToken(), "CONCURRENT_SES_1", deviceId);
                     attendanceService.recordAttendanceViaQr(req, studentId, "127.0.0.1", "Bench");
                     successCount.incrementAndGet();
                 } catch (IllegalStateException e) {

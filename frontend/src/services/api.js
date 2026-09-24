@@ -68,7 +68,7 @@ export const getHealthStatus = async () => {
 };
 
 // Dynamic QR APIs
-export const generateQrToken = async (courseId, sessionCode = null, coords = null) => {
+export const generateQrToken = async (courseId, sessionCode = null) => {
   const params = {};
   if (courseId) {
     params.courseId = courseId;
@@ -76,23 +76,7 @@ export const generateQrToken = async (courseId, sessionCode = null, coords = nul
   if (sessionCode) {
     params.sessionCode = sessionCode;
   }
-  if (coords && coords.latitude != null && coords.longitude != null) {
-    params.latitude = coords.latitude;
-    params.longitude = coords.longitude;
-    if (coords.accuracy != null) {
-      params.accuracy = coords.accuracy;
-    }
-  }
   const response = await api.post('/attendance/qr/generate', null, { params });
-  return response.data;
-};
-
-export const setClassroomLocation = async (sessionCode, { latitude, longitude, accuracy }) => {
-  const response = await api.post(`/classes/${encodeURIComponent(sessionCode)}/location`, {
-    latitude,
-    longitude,
-    accuracy
-  });
   return response.data;
 };
 
@@ -100,9 +84,6 @@ export const scanQrAttendance = async ({
   qrToken,
   courseId,
   sessionCode,
-  latitude,
-  longitude,
-  accuracy,
   deviceFingerprint,
   studentId // optional: for test tampering verification
 }) => {
@@ -110,9 +91,6 @@ export const scanQrAttendance = async ({
     qrToken,
     courseId,
     sessionCode,
-    latitude,
-    longitude,
-    accuracy,
     deviceFingerprint
   };
   if (studentId) {

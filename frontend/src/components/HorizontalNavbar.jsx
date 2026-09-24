@@ -587,7 +587,7 @@ const HorizontalNavbar = ({
                         </svg>
                         <div className="dropdown-item-info">
                           <span className="dropdown-item-title">Scan QR Attendance</span>
-                          <span className="dropdown-item-desc">Test mobile camera QR scanner &amp; GPS geofence</span>
+                          <span className="dropdown-item-desc">Mobile camera QR scanner &amp; attendance</span>
                         </div>
                       </button>
                     </div>
