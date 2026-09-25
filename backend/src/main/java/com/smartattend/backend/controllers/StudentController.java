@@ -65,9 +65,10 @@ public class StudentController {
     @GetMapping
     public ResponseEntity<?> getAllStudents(Authentication authentication) {
         if (authentication == null || authentication.getAuthorities().stream().noneMatch(a ->
-                "ROLE_ADMIN".equals(a.getAuthority()) || "ROLE_HOD".equals(a.getAuthority()))) {
+                "ROLE_ADMIN".equals(a.getAuthority()) || "ROLE_HOD".equals(a.getAuthority()) ||
+                "ROLE_FACULTY".equals(a.getAuthority()) || "ROLE_TEACHER".equals(a.getAuthority()))) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Access denied: Only Admin or HOD can list all students."));
+                    .body(Map.of("error", "Access denied: Only Admin, HOD, or Faculty can list students."));
         }
         List<Student> students = studentService.getAllStudents();
         return ResponseEntity.ok(students);

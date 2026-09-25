@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { QRCodeSVG } from 'qrcode.react';
-import { generateQrToken, getCourseAttendance, getCourses, getClassAttendance, getStudents, getClasses } from '../services/api.js';
+import { generateQrToken, getCourseAttendance, getCourses, getClassAttendance, getStudents, getClasses, getCourseAttendanceSummary } from '../services/api.js';
 
 const REFRESH_SECONDS = 5;
 
@@ -124,14 +124,36 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
           getStudents().catch(() => [])
         ]);
         setAvailableCourses(list || []);
-        if ((!courseId || courseId.trim() === '') && list && list.length > 0) {
-          setCourseId(list[0].courseId);
+        const activeCId = courseId || (list && list.length > 0 ? list[0].courseId : '');
+        if ((!courseId || courseId.trim() === '') && activeCId) {
+          setCourseId(activeCId);
         }
-        if (studentsList && studentsList.length > 0) {
-          setEnrolledStudents(studentsList);
-        } else {
-          setEnrolledStudents([{ studentId: '12345678', studentName: 'Akash Patil' }]);
+        let resolvedStudents = (Array.isArray(studentsList) && studentsList.length > 0) ? studentsList : [];
+        if (activeCId) {
+          try {
+            const summary = await getCourseAttendanceSummary(activeCId);
+            if (summary && Array.isArray(summary.students) && summary.students.length > 0) {
+              resolvedStudents = summary.students;
+            }
+          } catch (_) {}
         }
+        // Filter roster to students eligible for/enrolled in this course's academic cohort
+        const courseObj = (list || []).find(
+          (c) => String(c?.courseId || '').trim().toUpperCase() === String(activeCId).trim().toUpperCase()
+        );
+        if (courseObj && Array.isArray(resolvedStudents)) {
+          resolvedStudents = resolvedStudents.filter((st) => {
+            const branchMatch = !courseObj.branch || !st.branch || courseObj.branch.trim().toLowerCase() === st.branch.trim().toLowerCase();
+            const yearMatch = !courseObj.academicYear || !st.academicYear || courseObj.academicYear.trim().toLowerCase() === st.academicYear.trim().toLowerCase();
+            const semMatch = !courseObj.semester || !st.semester || Number(courseObj.semester) === Number(st.semester);
+            const divMatch = !courseObj.division || !st.division || courseObj.division.trim().toLowerCase() === st.division.trim().toLowerCase();
+            const isTheory = !courseObj.courseType || courseObj.courseType.trim().toUpperCase() === 'THEORY';
+            const isAllBatch = !courseObj.batch || courseObj.batch.trim().toUpperCase() === 'ALL';
+            const batchMatch = isTheory || isAllBatch || !st.batch || courseObj.batch.trim().toLowerCase() === st.batch.trim().toLowerCase();
+            return branchMatch && yearMatch && semMatch && divMatch && batchMatch;
+          });
+        }
+        setEnrolledStudents(resolvedStudents);
       } catch (err) {
         console.warn('Could not fetch course or student directory:', err);
       }
@@ -388,18 +410,43 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
     return set;
   }, [attendees]);
 
-  // Enrolled roster list (guarantee student 12345678 is present for demo test if empty)
+  // Enrolled roster list (dynamically aggregated from database directory and live attendee stream)
   const rosterList = useMemo(() => {
-    if (Array.isArray(enrolledStudents) && enrolledStudents.length > 0) {
-      return enrolledStudents
-        .map((s) => ({
-          studentId: String(s?.studentId || '').trim(),
-          studentName: s?.studentName || s?.fullName || (s?.studentId ? `Student ${s.studentId}` : 'Student')
-        }))
-        .filter((s) => Boolean(s.studentId));
+    const studentMap = new Map();
+
+    if (Array.isArray(enrolledStudents)) {
+      enrolledStudents.forEach((s) => {
+        const sid = String(s?.studentId || '').trim();
+        if (sid) {
+          studentMap.set(sid.toUpperCase(), {
+            studentId: sid,
+            studentName: s?.studentName || s?.fullName || `Student ${sid}`
+          });
+        }
+      });
     }
-    return [{ studentId: '12345678', studentName: 'Akash Patil' }];
-  }, [enrolledStudents]);
+
+    if (Array.isArray(attendees)) {
+      attendees.forEach((a) => {
+        const sid = String(a?.student?.studentId || a?.studentId || '').trim();
+        if (sid) {
+          const upperSid = sid.toUpperCase();
+          const attendeeName = a?.student?.studentName || a?.studentName;
+          const existing = studentMap.get(upperSid);
+          if (!existing) {
+            studentMap.set(upperSid, {
+              studentId: sid,
+              studentName: attendeeName || `Student ${sid}`
+            });
+          } else if (attendeeName && (!existing.studentName || existing.studentName.startsWith('Student '))) {
+            existing.studentName = attendeeName;
+          }
+        }
+      });
+    }
+
+    return Array.from(studentMap.values());
+  }, [enrolledStudents, attendees]);
 
   const totalStudentsCount = rosterList.length;
   const presentStudentsCount = rosterList.filter(
@@ -655,6 +702,7 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
                   const recordSid = String(a?.student?.studentId || a?.studentId || '').toUpperCase();
                   return recordSid && recordSid === sId;
                 });
+                const displayName = matchingRecord?.student?.studentName || student?.studentName || (sId ? `Student ${student?.studentId}` : 'Student');
 
                 return (
                   <li
@@ -673,11 +721,11 @@ const TeacherQrDashboard = ({ initialCourseId = '', initialSessionCode = '', onB
                         color: isPresent ? '#15803d' : '#64748b'
                       }}
                     >
-                      {student?.studentName ? student.studentName.charAt(0).toUpperCase() : 'S'}
+                      {displayName ? displayName.charAt(0).toUpperCase() : 'S'}
                     </div>
                     <div className="attendee-details">
                       <span className="attendee-name" style={{ fontWeight: 700 }}>
-                        {student?.studentName || `Student ${student?.studentId || 'N/A'}`}
+                        {displayName}
                       </span>
                       <div className="attendee-meta-row" style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                         <span className="record-id-chip">Student #{student?.studentId || 'N/A'}</span>

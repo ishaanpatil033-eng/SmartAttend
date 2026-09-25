@@ -426,6 +426,11 @@ public class UserAccountService implements UserDetailsService {
                 .orElseThrow(() -> new IllegalArgumentException("Faculty not found with ID: " + facultyId.trim()));
         if (fullName != null && !fullName.trim().isEmpty()) {
             account.setFullName(fullName.trim());
+            List<Course> courses = courseRepository.findByAssignedFacultyId(facultyId.trim());
+            for (Course c : courses) {
+                c.setAssignedFacultyName(fullName.trim());
+            }
+            courseRepository.saveAll(courses);
         }
         if (email != null && !email.trim().isEmpty()) {
             account.setEmail(email.trim());
